@@ -1,0 +1,6 @@
+{
+  "name": "STILL-care",
+  "description": "AI-powered conversational support, monitoring, and distress prediction platform with explainable AI and human-in-the-loop supervisor oversight.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

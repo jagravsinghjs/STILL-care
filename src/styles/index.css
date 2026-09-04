@@ -1,0 +1,71 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bone: #F8F7F2;
+  --color-charcoal: #202522;
+  --color-charcoal-muted: #66706A;
+  --color-border-subtle: #D9DDD7;
+  
+  --color-forest: #24533F;
+  --color-moss: #24533F;
+  --color-secondary-green: #5F8067;
+  --color-sage: #DCE8DC;
+  --color-cream: #F3EFE5;
+  --color-peach: #F4D8C5;
+  --color-lavender: #E8E3F2;
+  --color-soft-blue: #DDEAF0;
+  
+  /* Backward-compatible aliases for existing elements */
+  --color-slate-teal: #24533F;
+  --color-clay-soft: #E89A7A;
+  --color-paper-grey: #F3EFE5;
+
+  --color-risk-green: #2E6B4F;
+  --color-risk-amber: #B9822F;
+  --color-risk-red: #B84D3E;
+
+  --font-serif: "Manrope", -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+:root {
+  --bg-bone: #F8F7F2;
+  --text-charcoal: #202522;
+  --text-muted: #66706A;
+  --border-subtle: #D9DDD7;
+  --primary-forest: #24533F;
+  --secondary-botanical: #5F8067;
+  --accent-sage: #DCE8DC;
+  --surface-cream: #F3EFE5;
+  --accent-peach: #F4D8C5;
+  --accent-lavender: #E8E3F2;
+  --accent-soft-blue: #DDEAF0;
+
+  --risk-green: #2E6B4F;
+  --risk-amber: #B9822F;
+  --risk-red: #B84D3E;
+}
+
+body {
+  background-color: var(--bg-bone);
+  color: var(--text-charcoal);
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+  margin: 0;
+  padding: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1, h2, h3, h4, .font-serif {
+  font-family: "Manrope", -apple-system, BlinkMacSystemFont, sans-serif;
+  letter-spacing: -0.02em;
+}
+
+/* Subtle botanical organic shape background utilities */
+.bg-radial-glow {
+  background: radial-gradient(circle at 85% 15%, rgba(220, 232, 220, 0.45) 0%, rgba(244, 216, 197, 0.18) 45%, transparent 70%);
+}
+
+.bg-organic-blob {
+  background: radial-gradient(circle at 10% 85%, rgba(232, 227, 242, 0.35) 0%, rgba(221, 234, 240, 0.25) 50%, transparent 80%);
+}
