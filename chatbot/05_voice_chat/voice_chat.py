@@ -113,7 +113,7 @@ END_PHRASES = None  # no longer used — session end is now a manual keyboard ac
 def load_models():
     print("Loading Whisper model...")
     t0 = time.time()
-    whisper_model = WhisperModel("medium", device="cuda", compute_type="float16")
+    whisper_model = WhisperModel("medium", device="cpu", compute_type="int8")
     print(f"Whisper loaded in {time.time()-t0:.1f}s")
 
     print("Loading text-emotion model...")
