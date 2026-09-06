@@ -3,70 +3,70 @@
         {
             "start": 0.0,
             "end": 7.68,
-            "distress_score": 7,
-            "note": "Initial high arousal, insomnia concerns"
+            "distress_score": 6,
+            "note": "Slightly anxious, but calm tone"
         },
         {
             "start": 7.68,
             "end": 10.84,
             "distress_score": 4,
-            "note": "Mood stabilizes, but still low energy"
+            "note": "Fearful thoughts, mildly anxious"
         },
         {
             "start": 10.84,
             "end": 17.28,
-            "distress_score": 6,
-            "note": "Work stress and lack of sleep persist"
+            "distress_score": 7,
+            "note": "Work stress, high anxiety"
         },
         {
             "start": 17.28,
             "end": 21.44,
             "distress_score": 5,
-            "note": "Missed lunch, work efforts increased"
+            "note": "Missing lunch, low motivation"
         },
         {
             "start": 21.44,
             "end": 27.32,
             "distress_score": 8,
-            "note": "Feelings of low mood and isolation"
+            "note": "Low mood, high distress"
         },
         {
             "start": 27.32,
             "end": 31.64,
             "distress_score": 4,
-            "note": "Emotional processing, but still low energy"
+            "note": "Emotional, low motivation"
         },
         {
             "start": 31.64,
             "end": 36.2,
             "distress_score": 5,
-            "note": "Considering social interaction, but reluctant"
+            "note": "Consider exploring options to engage"
         },
         {
             "start": 36.2,
             "end": 39.04,
-            "distress_score": 3,
-            "note": "Feel overwhelmed, low energy"
+            "distress_score": 6,
+            "note": "Feelings of low energy"
         },
         {
             "start": 39.04,
             "end": 44.2,
-            "distress_score": 4,
-            "note": "Unstable sleep patterns"
+            "distress_score": 5,
+            "note": "Sleep issues, moderate anxiety"
         },
         {
             "start": 44.2,
             "end": 45.96,
-            "distress_score": 4,
-            "note": "Specific time of day sleep issues"
+            "distress_score": 5,
+            "note": "Short, low energy segment"
         },
         {
             "start": 45.96,
             "end": 49.24,
-            "distress_score": 5,
-            "note": "Wish for the week to end"
+            "distress_score": 4,
+            "note": "Closing thoughts, low anxiety"
         }
     ],
-    "clinician_summary": "The patient started with high distress due to insomnia and work stress, but showed some stabilizing in segments 2 and 3. Emotions of low mood and reluctance to engage remained throughout, with specific concerns about sleep patterns and a desire for the week to end.",
-    "patient_message": "Hey, sounds like today was a lot \ud83d\ude25 but you pushed through it, and that says something \ud83d\udcaa. Proud of you for showing up. \ud83d\ude0a I hear that the week feels heavy, but try to take small steps. Maybe listen to some music or a podcast when you can, to help shift your mood a bit. \ud83c\udfa7"
+    "clinician_summary": "The patient started with elevated distress, especially around work and sleep issues. They expressed low motivation and emotional discomfort but seemed to settle somewhat by the end of the session.",
+    "patient_message": "Sounds like today was a lot \ud83d\ude25 but you pushed through it, and that says something \ud83d\udcaa. Proud of you for showing up. \ud83c\udf1f Sleep's been all over the place too, like either I am wide awake at 2 am or completely wiped out by 4. Maybe try a short walk or a quiet activity to help your mind and body feel more balanced. \ud83c\udf04"
 }

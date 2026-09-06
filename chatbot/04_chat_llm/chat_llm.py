@@ -24,6 +24,8 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 OLLAMA_URL = "http://localhost:11434/api/chat"
 MODEL = "qwen2.5:7b-instruct"
 
+REQUIRED_KEYS = ("segments", "clinician_summary", "patient_message")
+
 SYSTEM_PROMPT = """You are a clinical decision-support assistant, NOT a therapist and NOT a diagnostic tool.
 You are given a transcript of a patient's voice-note reflections, segment by segment, along with
 acoustic features (pitch variability, energy variability, pause ratio, arousal label) extracted from
@@ -74,12 +76,38 @@ Return ONLY valid JSON, no markdown fences, no preamble, in exactly this shape:
   "clinician_summary": "<string>",
   "patient_message": "<string>"
 }
+
+IMPORTANT: Always include ALL THREE top-level keys — "segments", "clinician_summary", and
+"patient_message" — in every response, even if you have to keep clinician_summary or
+patient_message brief to fit. Never omit a key.
 """
 
 
+def trim_segment_for_prompt(seg):
+    """
+    Send the LLM only what the prompt actually asks it to reason about.
+    Drops the raw 8-way speech_emotion probability dict (redundant noise the
+    prompt never references) and keeps just the label, to cut prompt size
+    and avoid conflicting-signal confusion between arousal_label and
+    speech_emotion_label on short clips.
+    """
+    trimmed = {
+        "start": seg.get("start"),
+        "end": seg.get("end"),
+        "text": seg.get("text"),
+        "acoustic_features": seg.get("acoustic_features"),
+        "arousal_label": seg.get("arousal_label"),
+    }
+    if "speech_emotion_label" in seg:
+        trimmed["speech_emotion_label"] = seg["speech_emotion_label"]
+    return trimmed
+
+
 def call_ollama(transcript_segments):
+    trimmed_segments = [trim_segment_for_prompt(s) for s in transcript_segments]
+
     user_content = "Transcript segments with acoustic features:\n\n" + json.dumps(
-        transcript_segments, indent=2
+        trimmed_segments, indent=2
     )
 
     payload = {
@@ -90,6 +118,14 @@ def call_ollama(transcript_segments):
         ],
         "stream": False,
         "format": "json",  # ask ollama to constrain to valid JSON
+        "options": {
+            # Default num_ctx (2048) is too small once acoustic + emotion
+            # fields are included for every segment — the model can run out
+            # of context mid-generation and Ollama closes the JSON early,
+            # silently dropping clinician_summary/patient_message.
+            "num_ctx": 8192,
+            "num_predict": 2048,
+        },
     }
 
     resp = requests.post(OLLAMA_URL, json=payload, timeout=300)
@@ -121,7 +157,7 @@ def call_ollama(transcript_segments):
     cleaned = cleaned.strip()
 
     try:
-        return json.loads(cleaned)
+        parsed = json.loads(cleaned)
     except json.JSONDecodeError:
         # save what we got so it's inspectable instead of losing it
         debug_path = os.path.join(SCRIPT_DIR, "output", "_last_raw_response.txt")
@@ -130,6 +166,22 @@ def call_ollama(transcript_segments):
             f.write(raw)
         print(f"Could not parse model output as JSON. Raw output saved to {debug_path}")
         raise
+
+    missing = [k for k in REQUIRED_KEYS if k not in parsed]
+    if missing:
+        debug_path = os.path.join(SCRIPT_DIR, "output", "_last_raw_response.txt")
+        os.makedirs(os.path.dirname(debug_path), exist_ok=True)
+        with open(debug_path, "w") as f:
+            f.write(raw)
+        raise RuntimeError(
+            f"Ollama returned valid JSON but was missing required key(s): {missing}. "
+            f"This usually means the response got cut off before finishing (context/output "
+            f"limit reached) or 'done_reason' was not a natural stop. Raw output saved to "
+            f"{debug_path} for inspection — check its 'done_reason' field if present, and "
+            f"consider trimming the input transcript or raising num_ctx/num_predict further."
+        )
+
+    return parsed
 
 
 def make_graph(segments, out_path):
@@ -257,7 +309,7 @@ def main(input_path, output_dir):
 
 if __name__ == "__main__":
     input_path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(
-        SCRIPT_DIR, "input", "transcript_with_acoustic_metric.json"
+        SCRIPT_DIR, "input", "transcript_with_emotions.json"
     )
     output_dir = sys.argv[2] if len(sys.argv) > 2 else os.path.join(SCRIPT_DIR, "output")
     main(input_path, output_dir)
