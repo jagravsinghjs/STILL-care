@@ -7,7 +7,7 @@ import time
 # ------------------------------------------------------------------
 
 BASE_DIR = Path(__file__).parent
-AUDIO_PATH = BASE_DIR / "audio" / "test.wav"
+AUDIO_PATH = BASE_DIR / "input" / "test.wav"
 OUTPUT_PATH = BASE_DIR / "output" / "transcript.txt"
 
 # ------------------------------------------------------------------
