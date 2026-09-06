@@ -49,3 +49,4 @@ STILL_BUILD_ALERTD = "ON"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
