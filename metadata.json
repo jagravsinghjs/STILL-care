@@ -1,0 +1,6 @@
+{
+  "name": "STILL-care",
+  "description": "Conversational reflection support and longitudinal care continuity platform with human-in-the-loop counselor oversight.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
