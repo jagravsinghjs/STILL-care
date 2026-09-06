@@ -1,0 +1,5 @@
+# Generated session outputs
+output/session_*/
+
+# Temporary audio/files
+tmp/
