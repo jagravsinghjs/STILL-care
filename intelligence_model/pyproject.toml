@@ -1,0 +1,51 @@
+[build-system]
+requires = ["scikit-build-core>=0.10", "pybind11==2.13.6"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "still-monitoring"
+version = "0.1.0"
+description = "Still (SIH26094) -- Modules 11-17: Monitoring & Intelligence layer"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi==0.115.6",
+    "uvicorn[standard]==0.34.0",
+    "pydantic==2.12.2",
+    "reportlab==4.2.5",
+    "numpy==2.2.1",
+    "scikit-learn==1.6.0",
+    "python-dotenv==1.0.1",
+]
+
+[project.optional-dependencies]
+# Build-time / test-only deps from requirements.txt -- not needed at runtime
+# by anyone just running the API, only by contributors building the C++
+# extension or running the test suite.
+dev = [
+    "pytest==8.3.4",
+    "httpx==0.28.1",
+    "pybind11==2.13.6",
+]
+
+# ---------------------------------------------------------------------------
+# scikit-build-core: builds CMakeLists.txt (core_cpp's `still_core` pybind11
+# module + alertd) and drops the results into the wheel/editable install
+# alongside the flat top-level packages below -- no src/ layout, matching
+# architecture.md's top-level directory layout exactly.
+# ---------------------------------------------------------------------------
+[tool.scikit-build]
+cmake.source-dir = "."
+cmake.build-type = "Release"
+wheel.packages = ["db", "schemas", "modules", "pipeline", "api"]
+build.verbose = false
+logging.level = "INFO"
+
+# CMake options exposed via `pip install -e . --config-settings=cmake.define.STILL_BUILD_ALERTD=OFF`
+# if a contributor wants a Python-only editable install without a C toolchain
+# for alertd (still_core itself is always required).
+[tool.scikit-build.cmake.define]
+STILL_BUILD_CPP_TESTS = "ON"
+STILL_BUILD_ALERTD = "ON"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

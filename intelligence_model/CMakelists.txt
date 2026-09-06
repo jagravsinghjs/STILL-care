@@ -1,0 +1,90 @@
+cmake_minimum_required(VERSION 3.18)
+project(still_monitoring LANGUAGES CXX C)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "" FORCE)
+endif()
+
+option(STILL_BUILD_CPP_TESTS "Build core_cpp/tests/* native unit test binaries" ON)
+option(STILL_BUILD_ALERTD "Build the alertd C daemon alongside the Python extension" ON)
+
+# ---------------------------------------------------------------------------
+# pybind11
+# ---------------------------------------------------------------------------
+# `pip install -e .` builds this via scikit-build-core, inside the same venv
+# where pybind11 is already installed (requirements.txt / build-system.requires).
+# Ask the interpreter directly for pybind11's CMake config dir rather than
+# assuming CMAKE_PREFIX_PATH is already set for us.
+find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
+execute_process(
+    COMMAND "${Python_EXECUTABLE}" -m pybind11 --cmakedir
+    OUTPUT_VARIABLE pybind11_DIR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+find_package(pybind11 CONFIG REQUIRED)
+
+# ---------------------------------------------------------------------------
+# core_cpp -- numeric core (turn scoring, session stats, trend regression,
+# risk aggregation) + its pybind11 binding module.
+#
+# Module name deliberately `still_core` (not the doc's literal `setu_core`)
+# to match the still_monitoring package name -- flag if you'd rather keep
+# `setu_core` verbatim.
+# ---------------------------------------------------------------------------
+set(CORE_CPP_MATH_SOURCES
+    core_cpp/src/turn_scoring.cpp
+    core_cpp/src/session_stats.cpp
+    core_cpp/src/trend_regression.cpp
+    core_cpp/src/risk_aggregation.cpp
+)
+
+pybind11_add_module(still_core
+    core_cpp/src/bindings.cpp
+    ${CORE_CPP_MATH_SOURCES}
+)
+target_include_directories(still_core PRIVATE core_cpp/include)
+
+# Installed to the wheel root so `import still_core` resolves for
+# modules/module11_session_analysis, module12_distress_monitoring, and
+# module13_escalation_prediction exactly like any other top-level package.
+install(TARGETS still_core DESTINATION .)
+
+if(STILL_BUILD_CPP_TESTS)
+    enable_testing()
+
+    add_executable(test_turn_scoring
+        core_cpp/tests/test_turn_scoring.cpp
+        core_cpp/src/turn_scoring.cpp
+    )
+    target_include_directories(test_turn_scoring PRIVATE core_cpp/include)
+    add_test(NAME test_turn_scoring COMMAND test_turn_scoring)
+
+    add_executable(test_session_stats
+        core_cpp/tests/test_session_stats.cpp
+        core_cpp/src/session_stats.cpp
+    )
+    target_include_directories(test_session_stats PRIVATE core_cpp/include)
+    add_test(NAME test_session_stats COMMAND test_session_stats)
+endif()
+
+# ---------------------------------------------------------------------------
+# alertd -- standalone C real-time alert daemon. Independently buildable
+# (per architecture.md's justification for splitting it out): disable with
+# -DSTILL_BUILD_ALERTD=OFF if you only want the Python extension.
+# ---------------------------------------------------------------------------
+if(STILL_BUILD_ALERTD)
+    find_package(Threads REQUIRED)
+    find_package(SQLite3 REQUIRED)
+
+    add_executable(alertd
+        alertd/alertd.c
+        alertd/socket_server.c
+    )
+    target_include_directories(alertd PRIVATE alertd ${SQLite3_INCLUDE_DIRS})
+    target_link_libraries(alertd PRIVATE Threads::Threads ${SQLite3_LIBRARIES})
+endif()
