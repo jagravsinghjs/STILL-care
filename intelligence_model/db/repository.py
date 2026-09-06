@@ -23,7 +23,7 @@ import sqlite3
 from datetime import datetime
 from typing import Optional
 
-from connection import get_conn
+from db.connection import get_conn
 from schemas.serialization import (
     enum_list_from_json,
     enum_list_to_json,
