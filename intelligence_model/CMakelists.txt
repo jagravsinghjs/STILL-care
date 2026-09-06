@@ -10,6 +10,18 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "" FORCE)
 endif()
 
+# Link-time optimization in Release builds: core_cpp's header/.cpp split
+# (one declaration file, one definition file per component, per
+# architecture.md) means calls like TurnScorer::score() cross a translation
+# unit boundary and won't be inlined by a single-TU compile alone -- LTO
+# lets the linker inline across that boundary anyway, at effectively zero
+# cost to the file layout the doc calls for.
+include(CheckIPOSupported)
+check_ipo_supported(RESULT STILL_IPO_SUPPORTED OUTPUT STILL_IPO_ERROR)
+if(STILL_IPO_SUPPORTED AND CMAKE_BUILD_TYPE STREQUAL "Release")
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
+endif()
+
 option(STILL_BUILD_CPP_TESTS "Build core_cpp/tests/* native unit test binaries" ON)
 option(STILL_BUILD_ALERTD "Build the alertd C daemon alongside the Python extension" ON)
 
@@ -70,6 +82,20 @@ if(STILL_BUILD_CPP_TESTS)
     )
     target_include_directories(test_session_stats PRIVATE core_cpp/include)
     add_test(NAME test_session_stats COMMAND test_session_stats)
+
+    add_executable(test_trend_regression
+        core_cpp/tests/test_trend_regression.cpp
+        core_cpp/src/trend_regression.cpp
+    )
+    target_include_directories(test_trend_regression PRIVATE core_cpp/include)
+    add_test(NAME test_trend_regression COMMAND test_trend_regression)
+
+    add_executable(test_risk_aggregation
+        core_cpp/tests/test_risk_aggregation.cpp
+        core_cpp/src/risk_aggregation.cpp
+    )
+    target_include_directories(test_risk_aggregation PRIVATE core_cpp/include)
+    add_test(NAME test_risk_aggregation COMMAND test_risk_aggregation)
 endif()
 
 # ---------------------------------------------------------------------------
