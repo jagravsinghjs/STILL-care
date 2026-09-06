@@ -6,3 +6,45 @@ coverage/
 *.log
 .env*
 !.env.example
+# Python virtual environments
+.venv/
+venv/
+ENV/
+env/
+env.bak/
+venv.bak/
+
+# Byte-compiled / optimized files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# PyTorch & Hugging Face model caches / weights
+.cache/
+huggingface/
+checkpoints/
+*.pt
+*.pth
+*.bin
+*.onnx
+*.safetensors
+
+# Environment variables & secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# IDEs and Text Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Logs and runtime data
+*.log
+logs/
+*.sqlite
+*.db
