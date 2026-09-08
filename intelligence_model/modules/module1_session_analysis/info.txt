@@ -1,0 +1,9 @@
+# Module 1 — Session Analysis
+
+Consumes a finished session's raw `turns` and turns them into a stored,
+readable `SessionSummary`: per-turn distress scores, mean/max/min,
+volatility, within-session trend, and a flagged-high-pause list.
+`report_generator.py` renders that summary as a clinician-facing PDF.
+Nothing predictive happens here — no trend forecasting, no risk scoring.
+That's Modules 2 and 1's job; this module only describes what already
+happened in the session.
