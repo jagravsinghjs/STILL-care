@@ -105,7 +105,7 @@ endif()
 # ---------------------------------------------------------------------------
 if(STILL_BUILD_ALERTD)
     find_package(Threads REQUIRED)
-    find_package(SQLite3 REQUIRED)
+    # find_package(SQLite3 REQUIRED)
 
     add_executable(alertd
         alertd/alertd.c
