@@ -5,15 +5,20 @@ Module 16 -- thin client that pushes a freshly-inserted Alert to alertd
 via its Unix domain socket, so connected supervisor dashboards get a
 near-real-time push instead of waiting on the next poll.
 
-alertd does not exist yet (deferred per the build order -- CMakeLists.txt
-references its expected source paths, but alertd/alertd.c and
-alertd/socket_server.c aren't written). This means every call here will
-fail with a connection error until alertd is actually built and running.
-That failure is caught and logged, never raised -- notification is a
-best-effort enhancement on top of the real safety action (the Alert row
-itself, already durably written to `alerts` by alert_engine.py before
-this is ever called). A missing/down notifier must never make an alert
-disappear or block the pipeline.
+alertd (alertd/) is built and tested as of this writing -- a pure relay
+with two sockets: this function connects to its PUBLISH socket (connect,
+send one JSON payload, close), and alertd fans that out to every
+connected SUBSCRIBE-socket client (e.g. a dashboard). See alertd/README.md
+for the full design.
+
+Still best-effort, though, and that's permanent, not a placeholder: alertd
+being down, not yet started, or unreachable for any reason is a normal
+operating condition this function must survive silently. The Alert row
+itself is already durably written to `alerts` by alert_engine.py before
+this function is ever called -- that's the actual safety-relevant action.
+A missing/unreachable notifier must never make an alert disappear or
+block the pipeline; at worst, a dashboard finds out on its next poll of
+api/routes_alerts.py instead of instantly.
 """
 
 from __future__ import annotations
