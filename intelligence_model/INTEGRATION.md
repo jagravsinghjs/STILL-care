@@ -27,6 +27,20 @@ around this document's instructions.
 
 ---
 
+## Runtime checklist — what each side actually has to run
+
+Quick reference before the detailed sections below. Everything here is
+a real running thing, not a one-time setup step:
+
+| Who | Has to run / call | Why |
+|---|---|---|
+| Modules 6-9's integration layer | `ingest_turn()` per turn, `end_session_and_run()` once per finished session | The only way data enters this layer at all |
+| Modules 6-9's integration layer | Decide **when** a session has ended | Nothing in this repo can infer that — see the note in that section below |
+| Main Setu backend | Mount `api.main.app`, with `request.state.supervisor_id` already set | Supervisor portal's only read path into this layer |
+| Whoever owns process/deployment | Keep `alertd` running as its own long-lived process | Optional for correctness, required for real-time (rather than poll-only) dashboard updates — see its own section below |
+| Whoever builds the dashboard's live-update client | A client that connects to alertd's **subscribe** socket and stays connected | Otherwise `alerts` are only ever seen via polling `GET /alerts` |
+| Everyone above | Agree on `STILL_DB_PATH` (all three) and `STILL_ALERTD_SOCKET_PATH` / `STILL_ALERTD_SUBSCRIBE_SOCKET_PATH` (the alerting side) | See "The things everyone must agree on" at the bottom |
+
 ## For Modules 6-9's integration layer
 
 ### 1. Install this project as a dependency
@@ -37,9 +51,10 @@ pip install -e /path/to/intelligence_model
 
 This requires a C++ toolchain and CMake — `core_cpp/` compiles into a
 real Python extension (`still_core`) as part of this install, it's not
-pure Python. If your environment doesn't have (or doesn't want) the
-`alertd` C daemon's build dependencies (`libsqlite3-dev`, pthreads),
-build with it disabled:
+pure Python. `alertd` (see its own section below) builds alongside it by
+default and only needs pthreads — no SQLite dependency (alertd never
+touches the database). If your environment doesn't want to build it at
+all, disable it explicitly:
 
 ```bash
 pip install -e /path/to/intelligence_model --config-settings=cmake.define.STILL_BUILD_ALERTD=OFF
@@ -183,11 +198,74 @@ does).
 
 ---
 
-## The one thing both sides must agree on
+## For whoever runs alertd + builds the dashboard's live-update client
 
-`STILL_DB_PATH` — one file, one value, set identically wherever Modules
-6-9's code runs, wherever the pipeline actually executes, and wherever
-the main backend's `api/` mount runs. A mismatch here is the single most
-likely integration bug: everything will import cleanly, every function
-call will succeed, and the dashboard will simply show nothing, because
-two different SQLite files are being read from and written to.
+This is a **third** integration point, separate from the two above, and
+easy to miss because nothing about it shows up if you skip it — the
+system still works correctly, just without real-time push.
+
+`alertd` (`alertd/`) is a standalone C binary, **not** part of
+`pip install -e .`'s runtime behavior in the sense of starting itself —
+it's built by that install, but it has to be *run* as its own long-lived
+process, separately from the Python side, same category of thing as
+running a database or a message broker:
+
+```bash
+./build/alertd
+# or, to override the default socket paths:
+STILL_ALERTD_SOCKET_PATH=/custom/publish.sock \
+STILL_ALERTD_SUBSCRIBE_SOCKET_PATH=/custom/subscribe.sock \
+./build/alertd
+```
+
+**What it does:** Module 16's `notifier.py` connects to alertd's
+*publish* socket after every `Alert` row is written (connect, send one
+JSON payload, close). alertd fans that same payload out to every client
+currently connected to its *subscribe* socket. A dashboard/frontend
+relay is expected to be one of those subscribe-socket clients.
+
+**What the dashboard's live-update client needs to do:**
+1. Open a persistent connection to `STILL_ALERTD_SUBSCRIBE_SOCKET_PATH`
+   (default `/tmp/still_alertd_subscribe.sock`) and keep it open.
+2. Read from it continuously — alertd only ever writes to this socket,
+   never reads. Each alert arrives as one JSON object followed by `\n`;
+   several alerts arriving close together may show up concatenated in
+   one `read()`, so split on `\n` to recover individual messages.
+3. Parse each message as:
+   ```json
+   {"alert_id": "...", "patient_id": "...", "triggered_at": "ISO-8601",
+    "tier": "green|yellow|red", "reason": "[ESCALATION] ..."}
+   ```
+   (exact shape is `notifier.py`'s payload — see that file if this drifts).
+
+**What you do NOT need to do:** nothing about correctness depends on
+alertd being up. If it's down, not yet started, or a subscriber isn't
+connected at the moment an alert fires, that push is simply lost from
+alertd's perspective — never re-delivered — and that's fine by design.
+The `alerts` table (written *before* `notifier.py` is ever called) is
+the durable source of truth; a missed live push just means the
+dashboard finds out on its next `GET /alerts` poll instead of instantly.
+
+**Deeper reference if needed:** `alertd/README.md` (full design —
+why two sockets, why no persistence/replay, the CMake build target).
+
+---
+
+## The things everyone must agree on
+
+**`STILL_DB_PATH`** — one file, one value, set identically wherever
+Modules 6-9's code runs, wherever the pipeline actually executes, and
+wherever the main backend's `api/` mount runs. A mismatch here is the
+single most likely integration bug: everything will import cleanly,
+every function call will succeed, and the dashboard will simply show
+nothing, because two different SQLite files are being read from and
+written to.
+
+**`STILL_ALERTD_SOCKET_PATH`** (default `/tmp/still_alertd.sock`) and
+**`STILL_ALERTD_SUBSCRIBE_SOCKET_PATH`** (default
+`/tmp/still_alertd_subscribe.sock`) — must match between wherever
+`alertd` itself is started, wherever Module 16's `notifier.py` runs
+(i.e. wherever the pipeline executes), and wherever the dashboard's
+live-update client connects. A mismatch here is silent and low-stakes
+(worst case: no real-time push, same as alertd being down) rather than
+a hard failure — which makes it easy to not notice for a while.
