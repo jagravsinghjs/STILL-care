@@ -1,0 +1,18 @@
+# Module 14 — Explainable Risk Assessment
+
+Takes an `EscalationRisk`'s numeric, weighted `contributing_features` and
+turns them into a `RiskExplanation`: ranked, plain-language
+`ExplanationFactor`s a supervisor can actually read. No computation
+happens here — this module exists purely to satisfy the explainable-AI
+requirement, translating numbers into sentences.
+
+Wording lives in `phrase_templates.py` as data, not inline in
+`explainer.py`'s logic, specifically so it can be reviewed and edited
+without touching ranking/translation code. The bucket thresholds there
+are wording choices only — they don't affect `risk_score`, `risk_level`,
+or tier classification, so they're safe to retune independently.
+
+Factors are ranked by `|weight|` (highest contribution first). When a
+DB connection is available, the `trend_slope` phrase is enriched with the
+patient's actual `window_sessions` count (e.g. "worsening trend across
+the last 6 sessions") — otherwise it falls back to a generic phrase.
