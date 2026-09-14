@@ -547,6 +547,12 @@ if __name__ == "__main__":
         f"{CONVO_SYSTEM_PROMPT}\n\n{context_block}" if context_block else CONVO_SYSTEM_PROMPT
     )
 
+    print("\n" + "=" * 60)
+    print("DEBUG: system prompt being sent to the model")
+    print("=" * 60)
+    print(system_prompt)
+    print("=" * 60 + "\n")
+
     whisper_model, emotion_classifier = load_models()
     temp_dir = os.path.join(SCRIPT_DIR, "tmp")
     turns = run_conversation(whisper_model, emotion_classifier, temp_dir, system_prompt=system_prompt)
