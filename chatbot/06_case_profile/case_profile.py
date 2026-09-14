@@ -90,6 +90,11 @@ def extract_structured_facts(text: str) -> dict:
 # Call this ONLY on profile create/update, not per chat message.
 # ---------------------------------------------------------------------------
 
+def _is_meaningful_event(ev: dict) -> bool:
+    """An event with every field empty carries no information -- it's noise."""
+    return any(ev.get(k) for k in ("date", "type", "outcome", "notes"))
+
+
 def extract_narrative_facts(text: str, model: str = "qwen2.5:7b-instruct") -> dict:
     """
     One LLM call that pulls whatever the patient actually shared, in
@@ -157,6 +162,12 @@ Patient's text:
                 {"date": d, "type": None, "outcome": None, "notes": "date detected but not classified"}
             )
 
+    # drop any hearing_event where every field is empty -- despite being told
+    # not to invent details, the model sometimes returns a fully-null
+    # placeholder object rather than omitting the key. An event with nothing
+    # in it carries no information and just pollutes the list over time.
+    parsed["hearing_events"] = [ev for ev in parsed.get("hearing_events", []) if _is_meaningful_event(ev)]
+
     return parsed
 
 
@@ -194,6 +205,8 @@ def merge_case_facts(existing: dict, new: dict) -> dict:
             merged["sections"].append(s)
 
     for ev in new.get("hearing_events", []) or []:
+        if not _is_meaningful_event(ev):
+            continue
         match = next((e for e in merged["hearing_events"] if e.get("date") == ev.get("date")), None)
         if match:
             for k, v in ev.items():

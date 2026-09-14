@@ -48,6 +48,19 @@ OLLAMA_URL = "http://localhost:11434/api/chat"
 MODEL = "qwen2.5:7b-instruct"
 SAMPLE_RATE = 16000
 
+# Whisper hallucination mitigation. On short/near-silent/noisy audio,
+# faster-whisper will sometimes confidently return text that was never said
+# -- either generic training-data phrases ("thanks for watching") or, worse,
+# text in a totally different language/script than what was spoken. Forcing
+# a fixed language stops the per-clip language re-guessing that causes the
+# latter; the confidence thresholds below (same defaults OpenAI's own
+# reference Whisper implementation uses) filter out segments likely to be
+# hallucinated rather than real transcription.
+WHISPER_LANGUAGE = "en"  # set to None for auto-detect / adjust for multilingual support later
+NO_SPEECH_PROB_THRESHOLD = 0.6
+LOGPROB_THRESHOLD = -1.0
+COMPRESSION_RATIO_THRESHOLD = 2.4
+
 # ------------------------------------------------------------------
 # Case-context integration (06_case_profile)
 # ------------------------------------------------------------------
@@ -128,8 +141,6 @@ Return ONLY valid JSON, no markdown fences, no preamble, in exactly this shape:
   "patient_message": "<string>"
 }
 """
-
-END_PHRASES = None  # no longer used — session end is now a manual keyboard action, not detected speech
 
 
 # ------------------------------------------------------------------
@@ -291,6 +302,25 @@ def extract_acoustic_features(wav_path):
     }
 
 
+def filter_hallucinated_segments(segments):
+    """
+    Drop segments faster-whisper is unconfident about. These are the ones
+    most likely to be hallucinated (generic outro phrases, gibberish in the
+    wrong script/language) rather than real transcription of what was said
+    -- especially common on short or near-silent recordings.
+    """
+    kept = []
+    for seg in segments:
+        if seg.no_speech_prob is not None and seg.no_speech_prob > NO_SPEECH_PROB_THRESHOLD:
+            continue
+        if seg.avg_logprob is not None and seg.avg_logprob < LOGPROB_THRESHOLD:
+            continue
+        if seg.compression_ratio is not None and seg.compression_ratio > COMPRESSION_RATIO_THRESHOLD:
+            continue
+        kept.append(seg)
+    return kept
+
+
 def classify_arousal(features):
     if not features:
         return "unknown"
@@ -411,8 +441,14 @@ def run_conversation(whisper_model, emotion_classifier, temp_dir, system_prompt=
             print("No audio captured, try again.")
             continue
 
-        segments, info = whisper_model.transcribe(temp_path, beam_size=5)
+        segments, info = whisper_model.transcribe(
+            temp_path,
+            beam_size=5,
+            language=WHISPER_LANGUAGE,
+            condition_on_previous_text=False,  # stops hallucination loops from compounding across turns
+        )
         segments = list(segments)
+        segments = filter_hallucinated_segments(segments)
         turn_text = " ".join(s.text.strip() for s in segments).strip()
 
         if not turn_text:
@@ -546,12 +582,6 @@ if __name__ == "__main__":
     system_prompt = (
         f"{CONVO_SYSTEM_PROMPT}\n\n{context_block}" if context_block else CONVO_SYSTEM_PROMPT
     )
-
-    print("\n" + "=" * 60)
-    print("DEBUG: system prompt being sent to the model")
-    print("=" * 60)
-    print(system_prompt)
-    print("=" * 60 + "\n")
 
     whisper_model, emotion_classifier = load_models()
     temp_dir = os.path.join(SCRIPT_DIR, "tmp")
