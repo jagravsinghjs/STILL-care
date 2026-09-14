@@ -9,8 +9,19 @@ only the transcript text, extracted features, and eventual report persist.
 At the end of the session (you choose to stop between turns), a report
 is generated automatically and saved to output/session_<timestamp>/.
 
+Case context (--case-facts):
+  If given a path to a patient's case_facts.json (produced by
+  06_case_profile), its contents are rendered into the system prompt at
+  session start so the patient doesn't have to re-explain their FIR, an
+  upcoming hearing, etc. At session end, the full conversation is fed back
+  through the same extract/merge/summarize logic used for direct profile
+  edits, and the file is updated. This is the chatbot's "memory" — instead
+  of recalling old conversation turns directly, whatever it learns gets
+  folded into case_facts, which gets reloaded next session.
+
 Usage:
     python voice_chat.py
+    python voice_chat.py --case-facts ../06_case_profile/output/case_facts.json
 """
 
 import json
@@ -36,6 +47,21 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 OLLAMA_URL = "http://localhost:11434/api/chat"
 MODEL = "qwen2.5:7b-instruct"
 SAMPLE_RATE = 16000
+
+# ------------------------------------------------------------------
+# Case-context integration (06_case_profile)
+# ------------------------------------------------------------------
+
+CASE_PROFILE_DIR = os.path.join(SCRIPT_DIR, "..", "06_case_profile")
+sys.path.insert(0, CASE_PROFILE_DIR)
+try:
+    from case_profile import extract_and_merge_case_facts
+except ImportError:
+    extract_and_merge_case_facts = None
+    print(
+        "[warn] Could not import case_profile.py from 06_case_profile -- "
+        "case-context injection and post-session extraction will be skipped."
+    )
 
 # ------------------------------------------------------------------
 # Prompts
@@ -104,6 +130,73 @@ Return ONLY valid JSON, no markdown fences, no preamble, in exactly this shape:
 """
 
 END_PHRASES = None  # no longer used — session end is now a manual keyboard action, not detected speech
+
+
+# ------------------------------------------------------------------
+# Case context: load, inject into system prompt, and update after session
+# ------------------------------------------------------------------
+
+def load_case_facts(path):
+    if not path or not os.path.isfile(path):
+        return None
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def build_context_block(case_facts):
+    """
+    Render known case facts into a block prepended to the system prompt.
+    The model is told to use this silently -- never recite it back or
+    mention it was given background info, same pattern already used for
+    the [voice cues: ...] notes above.
+    """
+    if not case_facts:
+        return ""
+
+    lines = [
+        "You have been given some background the patient has already shared in "
+        "previous sessions or their case profile. Use it naturally if relevant "
+        "to what they're saying -- for example, don't make them re-explain their "
+        "FIR or an upcoming hearing if they bring it up. Do NOT recite this list "
+        "back to them or mention that you were given background information.",
+        "",
+        "Known case context:",
+    ]
+
+    if case_facts.get("case_type"):
+        lines.append(f"- Case type: {case_facts['case_type']}")
+    if case_facts.get("status_summary"):
+        lines.append(f"- Status: {case_facts['status_summary']}")
+
+    upcoming = [e for e in case_facts.get("hearing_events", []) if e.get("type") == "next_hearing"]
+    if upcoming:
+        dates = ", ".join(e.get("date", "unknown date") for e in upcoming)
+        lines.append(f"- Upcoming hearing(s): {dates}")
+
+    if case_facts.get("threats_mentioned"):
+        lines.append(f"- Reported safety concerns: {'; '.join(case_facts['threats_mentioned'])}")
+
+    return "\n".join(lines)
+
+
+def update_case_facts_from_session(turns, case_facts, model=MODEL):
+    """
+    Treats the whole conversation as another source of profile updates --
+    same extract/merge/summarize logic used for direct profile edits,
+    applied to whatever came up in chat. This is the "memory" mechanism:
+    instead of the chatbot recalling old conversation turns directly,
+    whatever it learns gets folded into case_facts, which gets reloaded
+    and injected at the start of the next session.
+    """
+    if extract_and_merge_case_facts is None:
+        print("[warn] case_profile module not available -- skipping case-facts update from this session.")
+        return case_facts
+
+    conversation_text = "\n".join(t["text"] for t in turns if t.get("text"))
+    if not conversation_text.strip():
+        return case_facts
+
+    return extract_and_merge_case_facts(conversation_text, existing_facts=case_facts, model=model)
 
 
 # ------------------------------------------------------------------
@@ -297,7 +390,7 @@ def should_nudge_toward_doctor(turns):
 # Main conversation loop
 # ------------------------------------------------------------------
 
-def run_conversation(whisper_model, emotion_classifier, temp_dir):
+def run_conversation(whisper_model, emotion_classifier, temp_dir, system_prompt=CONVO_SYSTEM_PROMPT):
     print("\nSession started. After each reply, press Enter to keep talking, or type 'report' to end and generate the report.\n")
 
     os.makedirs(temp_dir, exist_ok=True)
@@ -349,7 +442,7 @@ def run_conversation(whisper_model, emotion_classifier, temp_dir):
         user_content = f"{turn_text}\n{context_note}"
         messages.append({"role": "user", "content": user_content})
 
-        reply = call_ollama_chat(messages, CONVO_SYSTEM_PROMPT)
+        reply = call_ollama_chat(messages, system_prompt)
         print(f"\nAssistant: {reply}\n")
         messages.append({"role": "assistant", "content": reply})
 
@@ -433,13 +526,40 @@ def generate_report(turns, output_dir):
 
 
 if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Run a voice check-in session")
+    parser.add_argument(
+        "--case-facts",
+        help="Path to this patient's case_facts.json (from 06_case_profile). "
+             "If given, its contents are injected into the chat as context at "
+             "session start, and the file is updated with anything new "
+             "mentioned during the session.",
+    )
+    args = parser.parse_args()
+
+    case_facts = load_case_facts(args.case_facts)
+    if args.case_facts and case_facts is None:
+        print(f"[warn] --case-facts path given but not found or empty: {args.case_facts}")
+
+    context_block = build_context_block(case_facts)
+    system_prompt = (
+        f"{CONVO_SYSTEM_PROMPT}\n\n{context_block}" if context_block else CONVO_SYSTEM_PROMPT
+    )
+
     whisper_model, emotion_classifier = load_models()
     temp_dir = os.path.join(SCRIPT_DIR, "tmp")
-    turns = run_conversation(whisper_model, emotion_classifier, temp_dir)
+    turns = run_conversation(whisper_model, emotion_classifier, temp_dir, system_prompt=system_prompt)
 
     if not turns:
         print("No turns recorded, nothing to report on.")
         sys.exit(0)
+
+    if args.case_facts:
+        updated_facts = update_case_facts_from_session(turns, case_facts)
+        with open(args.case_facts, "w", encoding="utf-8") as f:
+            json.dump(updated_facts, f, indent=2)
+        print(f"\nCase facts updated: {args.case_facts}")
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_dir = os.path.join(SCRIPT_DIR, "output", f"session_{timestamp}")
