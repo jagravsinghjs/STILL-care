@@ -1,0 +1,27 @@
+{
+  "fir_number": "214/2025",
+  "sections": [
+    "302",
+    "34 IPC"
+  ],
+  "case_type": "murder",
+  "hearing_events": [
+    {
+      "date": "08/01/2026",
+      "type": "past_hearing",
+      "outcome": "witness statements taken",
+      "notes": null
+    },
+    {
+      "date": "sometime in May",
+      "type": "next_hearing",
+      "outcome": null,
+      "notes": null
+    }
+  ],
+  "threats_mentioned": [
+    "car following me"
+  ],
+  "status_summary": "The case, classified as a murder, involves charges under sections 302 and 34 of the Indian Penal Code (IPC). Witness statements were taken at a hearing on January 8, 2026. There is a pending hearing sometime in May, and the case notes a concern of car following the witness, indicating ongoing safety threats.",
+  "last_updated": "2026-09-14T09:31:11.324389+00:00"
+}

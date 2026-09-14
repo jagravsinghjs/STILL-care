@@ -213,6 +213,31 @@ def merge_case_facts(existing: dict, new: dict) -> dict:
     return merged
 
 
+def generate_status_summary(merged_facts: dict, model: str = "qwen2.5:7b-instruct") -> str:
+    """
+    Regenerates status_summary from the FULL merged case_facts, not just the
+    latest update -- this is what makes status_summary an actual running
+    memory of everything the patient has shared, instead of only reflecting
+    whatever they said most recently.
+    """
+    import ollama
+
+    facts_for_prompt = {k: v for k, v in merged_facts.items() if k != "status_summary"}
+
+    prompt = f"""Here is everything known so far about a patient's case, built up across
+multiple updates over time:
+
+{json.dumps(facts_for_prompt, indent=2)}
+
+Write a 2-4 sentence plain-language summary of where the case currently stands overall,
+covering the case type, key hearings/outcomes so far, and any ongoing concerns like
+threats. Base this only on the facts given. Respond with the summary text only -- no
+JSON, no headers, no preamble."""
+
+    response = ollama.chat(model=model, messages=[{"role": "user", "content": prompt}])
+    return response["message"]["content"].strip()
+
+
 # ---------------------------------------------------------------------------
 # Combined entry point -- call this on profile create/update
 # ---------------------------------------------------------------------------
@@ -222,10 +247,13 @@ def extract_and_merge_case_facts(text: str, existing_facts: dict = None,
     """
     Extracts whatever the patient just shared and merges it into their
     existing case_facts record (pass the previously stored dict, or None
-    for a brand-new patient).
+    for a brand-new patient). status_summary is then regenerated from the
+    complete merged facts, so it reflects everything provided so far.
     """
     new_facts = extract_narrative_facts(text, model=model)
-    return merge_case_facts(existing_facts or _empty_case_facts(), new_facts)
+    merged = merge_case_facts(existing_facts or _empty_case_facts(), new_facts)
+    merged["status_summary"] = generate_status_summary(merged, model=model)
+    return merged
 
 
 if __name__ == "__main__":
