@@ -1,0 +1,16 @@
+# Module 2 — Dynamic Distress Monitoring
+
+Consumes a patient's recent `SessionSummary` history (last 10 sessions)
+and produces one `DistressTrend`: a recency-weighted slope, a confidence
+score that grows with more data but never reaches 1.0, and a
+improving/stable/worsening/insufficient_data label.
+
+**Sign convention:** `slope` is *negative* when distress is worsening,
+*positive* when improving — chosen to match how Module 3's
+`risk_aggregation.cpp` consumes `trend_slope` downstream. Don't flip this
+without checking `risk_aggregation.cpp`'s negation too, or Module 3's
+risk scores will silently invert.
+
+`|slope| < 1.5` points/day is labeled `STABLE`. Fewer than 2 sessions in
+the window produces `INSUFFICIENT_DATA` (still persisted, not skipped —
+supervisors should see "not enough data yet" rather than nothing).

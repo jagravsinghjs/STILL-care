@@ -1,0 +1,288 @@
+[
+    {
+        "start": 0.0,
+        "end": 7.68,
+        "text": "Hi, so today's been kind of a rough one honestly, I didn't sleep much last night, just kept",
+        "acoustic_features": {
+            "pitch_mean_hz": 210.33,
+            "pitch_std_hz": 43.43,
+            "energy_mean": 0.036,
+            "energy_std": 0.0247,
+            "zero_crossing_rate": 0.1117,
+            "spectral_centroid": 1723.41,
+            "pause_ratio": 0.179
+        },
+        "arousal_label": "high_arousal",
+        "speech_emotion": {
+            "angry": 0.1228,
+            "calm": 0.1388,
+            "disgust": 0.1218,
+            "fearful": 0.1282,
+            "happy": 0.1297,
+            "neutral": 0.116,
+            "sad": 0.1302,
+            "surprised": 0.1124
+        },
+        "speech_emotion_label": "calm"
+    },
+    {
+        "start": 7.68,
+        "end": 10.84,
+        "text": "lying there, mind racing about nothing in particular.",
+        "acoustic_features": {
+            "pitch_mean_hz": 201.15,
+            "pitch_std_hz": 13.74,
+            "energy_mean": 0.0451,
+            "energy_std": 0.0243,
+            "zero_crossing_rate": 0.0711,
+            "spectral_centroid": 1200.12,
+            "pause_ratio": 0.149
+        },
+        "arousal_label": "neutral",
+        "speech_emotion": {
+            "angry": 0.1236,
+            "calm": 0.1213,
+            "disgust": 0.1244,
+            "fearful": 0.1296,
+            "happy": 0.1252,
+            "neutral": 0.1209,
+            "sad": 0.1271,
+            "surprised": 0.1279
+        },
+        "speech_emotion_label": "fearful"
+    },
+    {
+        "start": 10.84,
+        "end": 17.28,
+        "text": "Work felt heavier than usual, like everything took twice the effort it normally does.",
+        "acoustic_features": {
+            "pitch_mean_hz": 221.57,
+            "pitch_std_hz": 42.39,
+            "energy_mean": 0.0402,
+            "energy_std": 0.0317,
+            "zero_crossing_rate": 0.0799,
+            "spectral_centroid": 1385.67,
+            "pause_ratio": 0.25
+        },
+        "arousal_label": "high_arousal",
+        "speech_emotion": {
+            "angry": 0.1234,
+            "calm": 0.1266,
+            "disgust": 0.1242,
+            "fearful": 0.1281,
+            "happy": 0.1274,
+            "neutral": 0.1208,
+            "sad": 0.1253,
+            "surprised": 0.1241
+        },
+        "speech_emotion_label": "fearful"
+    },
+    {
+        "start": 17.28,
+        "end": 21.44,
+        "text": "I also skipped my lunch because I just didn't have it in me to get up.",
+        "acoustic_features": {
+            "pitch_mean_hz": 206.21,
+            "pitch_std_hz": 17.64,
+            "energy_mean": 0.038,
+            "energy_std": 0.021,
+            "zero_crossing_rate": 0.1258,
+            "spectral_centroid": 1753.73,
+            "pause_ratio": 0.085
+        },
+        "arousal_label": "neutral",
+        "speech_emotion": {
+            "angry": 0.1207,
+            "calm": 0.1309,
+            "disgust": 0.1173,
+            "fearful": 0.1328,
+            "happy": 0.1279,
+            "neutral": 0.1213,
+            "sad": 0.1263,
+            "surprised": 0.1229
+        },
+        "speech_emotion_label": "fearful"
+    },
+    {
+        "start": 21.44,
+        "end": 27.32,
+        "text": "I've been feeling pretty low the last few days, not really wanting to talk to anyone.",
+        "acoustic_features": {
+            "pitch_mean_hz": 347.52,
+            "pitch_std_hz": 361.31,
+            "energy_mean": 0.0476,
+            "energy_std": 0.0295,
+            "zero_crossing_rate": 0.0812,
+            "spectral_centroid": 1389.54,
+            "pause_ratio": 0.156
+        },
+        "arousal_label": "high_arousal",
+        "speech_emotion": {
+            "angry": 0.1221,
+            "calm": 0.1251,
+            "disgust": 0.1237,
+            "fearful": 0.1309,
+            "happy": 0.127,
+            "neutral": 0.1202,
+            "sad": 0.1275,
+            "surprised": 0.1235
+        },
+        "speech_emotion_label": "fearful"
+    },
+    {
+        "start": 27.32,
+        "end": 31.64,
+        "text": "I'm just trying to kind of going through the emotions.",
+        "acoustic_features": {
+            "pitch_mean_hz": 206.85,
+            "pitch_std_hz": 50.98,
+            "energy_mean": 0.0397,
+            "energy_std": 0.0336,
+            "zero_crossing_rate": 0.0952,
+            "spectral_centroid": 1439.41,
+            "pause_ratio": 0.304
+        },
+        "arousal_label": "neutral",
+        "speech_emotion": {
+            "angry": 0.1233,
+            "calm": 0.1262,
+            "disgust": 0.1283,
+            "fearful": 0.1265,
+            "happy": 0.1281,
+            "neutral": 0.1201,
+            "sad": 0.1225,
+            "surprised": 0.125
+        },
+        "speech_emotion_label": "disgust"
+    },
+    {
+        "start": 31.64,
+        "end": 36.2,
+        "text": "I know I should just probably get outside or call a friend, but even that feels like",
+        "acoustic_features": {
+            "pitch_mean_hz": 244.27,
+            "pitch_std_hz": 39.08,
+            "energy_mean": 0.0513,
+            "energy_std": 0.0244,
+            "zero_crossing_rate": 0.1111,
+            "spectral_centroid": 1655.12,
+            "pause_ratio": 0.042
+        },
+        "arousal_label": "neutral",
+        "speech_emotion": {
+            "angry": 0.1223,
+            "calm": 0.138,
+            "disgust": 0.1173,
+            "fearful": 0.1298,
+            "happy": 0.1281,
+            "neutral": 0.1186,
+            "sad": 0.1314,
+            "surprised": 0.1145
+        },
+        "speech_emotion_label": "calm"
+    },
+    {
+        "start": 36.2,
+        "end": 39.04,
+        "text": "a lot right now.",
+        "acoustic_features": {
+            "pitch_mean_hz": 199.1,
+            "pitch_std_hz": 94.04,
+            "energy_mean": 0.0282,
+            "energy_std": 0.0309,
+            "zero_crossing_rate": 0.0939,
+            "spectral_centroid": 1504.68,
+            "pause_ratio": 0.451
+        },
+        "arousal_label": "neutral",
+        "speech_emotion": {
+            "angry": 0.1264,
+            "calm": 0.1262,
+            "disgust": 0.1366,
+            "fearful": 0.1196,
+            "happy": 0.1285,
+            "neutral": 0.1128,
+            "sad": 0.13,
+            "surprised": 0.1199
+        },
+        "speech_emotion_label": "disgust"
+    },
+    {
+        "start": 39.04,
+        "end": 44.2,
+        "text": "Sleep's been all over the place too, like either I am wide awake at 2 am or completely",
+        "acoustic_features": {
+            "pitch_mean_hz": 232.17,
+            "pitch_std_hz": 18.72,
+            "energy_mean": 0.051,
+            "energy_std": 0.0282,
+            "zero_crossing_rate": 0.0845,
+            "spectral_centroid": 1337.48,
+            "pause_ratio": 0.05
+        },
+        "arousal_label": "neutral",
+        "speech_emotion": {
+            "angry": 0.1241,
+            "calm": 0.1373,
+            "disgust": 0.1235,
+            "fearful": 0.125,
+            "happy": 0.1306,
+            "neutral": 0.116,
+            "sad": 0.1298,
+            "surprised": 0.1137
+        },
+        "speech_emotion_label": "calm"
+    },
+    {
+        "start": 44.2,
+        "end": 45.96,
+        "text": "wiped out by 4.",
+        "acoustic_features": {
+            "pitch_mean_hz": 204.75,
+            "pitch_std_hz": 13.5,
+            "energy_mean": 0.0316,
+            "energy_std": 0.0238,
+            "zero_crossing_rate": 0.096,
+            "spectral_centroid": 1452.77,
+            "pause_ratio": 0.145
+        },
+        "arousal_label": "neutral",
+        "speech_emotion": {
+            "angry": 0.1294,
+            "calm": 0.1175,
+            "disgust": 0.1439,
+            "fearful": 0.1157,
+            "happy": 0.1271,
+            "neutral": 0.1094,
+            "sad": 0.1289,
+            "surprised": 0.1281
+        },
+        "speech_emotion_label": "disgust"
+    },
+    {
+        "start": 45.96,
+        "end": 49.24,
+        "text": "I don't know, I think I just need this week to be over.",
+        "acoustic_features": {
+            "pitch_mean_hz": 248.73,
+            "pitch_std_hz": 35.08,
+            "energy_mean": 0.0439,
+            "energy_std": 0.0242,
+            "zero_crossing_rate": 0.1128,
+            "spectral_centroid": 1574.48,
+            "pause_ratio": 0.029
+        },
+        "arousal_label": "neutral",
+        "speech_emotion": {
+            "angry": 0.1204,
+            "calm": 0.1406,
+            "disgust": 0.1126,
+            "fearful": 0.1324,
+            "happy": 0.1282,
+            "neutral": 0.1198,
+            "sad": 0.1329,
+            "surprised": 0.1131
+        },
+        "speech_emotion_label": "calm"
+    }
+]

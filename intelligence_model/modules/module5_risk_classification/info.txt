@@ -1,0 +1,31 @@
+# Module 15 — Status & Risk Classification
+
+Turns a continuous `EscalationRisk` into the three-color `RiskTier`
+(green/yellow/red) supervisors actually look at, with hysteresis so the
+dashboard doesn't flicker on noisy single-session data.
+
+## Rules (locked-in)
+
+- **Escalation** (GREEN→YELLOW, YELLOW→RED): 3 consecutive readings worse
+  than the current tier, one tier at a time.
+- **`acute_override`** bypasses all of this — forces RED immediately,
+  regardless of streak state.
+- **De-escalation, YELLOW→GREEN**: same flat 3-in-a-row rule as
+  escalation.
+- **De-escalation, RED→YELLOW**: weighted and more conservative. A `LOW`
+  (GREEN-equivalent) reading counts double a `MODERATE` (YELLOW-equivalent)
+  reading; the weighted total must reach 10 to step down (5 consecutive
+  LOW readings, or 10 consecutive MODERATE, or any consecutive mix
+  between). Any `HIGH` reading resets this to zero — "consecutive" is a
+  hard requirement, not just a rolling average.
+
+## State repurposing — read before touching this module
+
+`risk_status.consecutive_high_assessments` is the *only* counter field
+the schema provides. `hysteresis.py` repurposes it as a **signed streak
+counter** — positive while escalating, negative while de-escalating,
+reset to zero on any neutral reading. The column name no longer literally
+describes its contents. This was a deliberate choice to avoid a schema
+change; if a schema migration ever becomes acceptable, splitting this
+into an explicit `streak_direction` + `streak_count` (or two separate
+counters) would be more legible than the signed-integer trick used here.
