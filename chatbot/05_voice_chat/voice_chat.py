@@ -166,10 +166,15 @@ def build_context_block(case_facts):
 
     lines = [
         "You have been given some background the patient has already shared in "
-        "previous sessions or their case profile. Use it naturally if relevant "
-        "to what they're saying -- for example, don't make them re-explain their "
-        "FIR or an upcoming hearing if they bring it up. Do NOT recite this list "
-        "back to them or mention that you were given background information.",
+        "previous sessions or their case profile. Treat it the way you'd naturally "
+        "remember something a friend told you last time you talked -- if it's "
+        "relevant to what they're saying now, or if they directly ask whether you "
+        "remember something, respond specifically and confidently using what you "
+        "know (e.g. 'the car that's been following you -- has that happened again?'). "
+        "Do NOT play vague or non-committal when you actually do know the answer. "
+        "The only things to avoid: don't mechanically read this out as a list, and "
+        "don't say phrases like 'based on your case profile' or 'I was told' -- just "
+        "talk about it like a person who remembers, not a system reciting stored data.",
         "",
         "Known case context:",
     ]

@@ -23,11 +23,19 @@
       "type": null,
       "outcome": null,
       "notes": null
+    },
+    {
+      "date": "15",
+      "type": "next_hearing",
+      "outcome": null,
+      "notes": null
     }
   ],
   "threats_mentioned": [
-    "car following me"
+    "car following me",
+    "car incident",
+    "bikes following me"
   ],
-  "status_summary": "The case is a murder case under sections 302 and 34 IPC. Witness statements were taken at a hearing on January 8, 2026, and there is a next hearing scheduled sometime in May. The case also involves a threat of car following, which is an ongoing concern.",
-  "last_updated": "2026-09-14T18:06:23.515961+00:00"
+  "status_summary": "The case is a murder proceeding, with witness statements taken in a hearing on January 8, 2026. There are upcoming hearings scheduled for May and the 15th, but outcomes are not yet known. The patient is also facing concerns related to threats, including incidents involving cars and bikes following them.",
+  "last_updated": "2026-09-14T18:28:50.919094+00:00"
 }
