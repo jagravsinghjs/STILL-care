@@ -1,50 +1,54 @@
+# Frontend build artefacts and dependencies
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+frontend/.env.local
+frontend/.env.*
+!frontend/.env.example
+
+# Root node_modules (legacy location – kept ignored in case of accidental install)
 node_modules/
-build/
 dist/
-coverage/
-.DS_Store
+
+# Logs
 *.log
-.env*
-!.env.example
-# Python virtual environments
+
+# Backend secrets, local data and runtime
 .venv/
-venv/
-ENV/
-env/
-env.bak/
-venv.bak/
-
-# Byte-compiled / optimized files
 __pycache__/
-*.py[cod]
-*$py.class
+.pytest_cache/
+*.pyc
+*.db
+*.db-*
+backend/data/
+backend/.env
+coverage/
 
-# PyTorch & Hugging Face model caches / weights
-.cache/
-huggingface/
-checkpoints/
-*.pt
-*.pth
-*.bin
-*.onnx
-*.safetensors
-
-# Environment variables & secrets
-.env
-.env.local
-.env.*.local
-*.pem
-*.key
-
-# IDEs and Text Editors
+# IDE / OS
 .vscode/
 .idea/
-*.swp
-*.swo
 .DS_Store
+Thumbs.db
 
-# Logs and runtime data
-*.log
-logs/
-*.sqlite
-*.db
+# Audio files – never commit raw or generated audio
+*.wav
+*.webm
+*.mp3
+*.mp4
+*.m4a
+
+# Pipeline module runtime output (generated artefacts, not source)
+01_speech_to_text/output/
+02_acoustic_metrics/output/
+03_adding_emotions/output/
+04_chat_llm/output/
+05_voice_chat/output/
+05_voice_chat/tmp/
+
+# Intelligence model native build artefacts
+intelligence_model/build/
+intelligence_model/data/
+intelligence_model/*.egg-info/
+intelligence_model/dist/
+
+.vite/
