@@ -1,0 +1,41 @@
+{
+  "fir_number": "214/2025",
+  "sections": [
+    "302",
+    "34 IPC"
+  ],
+  "case_type": "murder",
+  "hearing_events": [
+    {
+      "date": "08/01/2026",
+      "type": "past_hearing",
+      "outcome": "witness statements taken",
+      "notes": null
+    },
+    {
+      "date": "sometime in May",
+      "type": "next_hearing",
+      "outcome": null,
+      "notes": null
+    },
+    {
+      "date": null,
+      "type": null,
+      "outcome": null,
+      "notes": null
+    },
+    {
+      "date": "15",
+      "type": "next_hearing",
+      "outcome": null,
+      "notes": null
+    }
+  ],
+  "threats_mentioned": [
+    "car following me",
+    "car incident",
+    "bikes following me"
+  ],
+  "status_summary": "The case is a murder proceeding, with witness statements taken in a hearing on January 8, 2026. There are upcoming hearings scheduled for May and the 15th, but outcomes are not yet known. The patient is also facing concerns related to threats, including incidents involving cars and bikes following them.",
+  "last_updated": "2026-09-14T18:28:50.919094+00:00"
+}
