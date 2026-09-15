@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { GetReport } from "../../components/shared/GetReport";
 import { Link, useParams } from "react-router-dom";
 import { ArrowRight, Check, Search } from "lucide-react";
 import { Card, Badge, Button, EmptyState } from "../../components/ui";
@@ -40,6 +41,7 @@ export function Supervisor({
         </Link>
         <h1>{person.name}</h1>
         <p className="lead">{person.context}</p>
+        <GetReport patientId={person.id} name={person.name} supervisor />
         <Card>
           <Badge>{person.status}</Badge>
           <h2 className="mt-5">{person.trend}</h2>
@@ -141,6 +143,7 @@ export function Supervisor({
                 <p>{s.summary}</p>
               </div>
               <div className="user-actions">
+                <GetReport patientId={s.id} name={s.name} supervisor />
                 <Link className="text-link" to={`/supervisor/patients/${s.id}`}>
                   View continuity <ArrowRight size={16} />
                 </Link>

@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { GetReport } from "../../components/shared/GetReport";
 import { ArrowRight } from "lucide-react";
 import { Card } from "../../components/ui";
 import {
@@ -20,6 +21,7 @@ export function Dashboard() {
           <h1>{identity?.name.split(" ")[0]}’s dashboard</h1>
           <p>Your previous and latest check-in updates.</p>
         </div>
+        {identity && <GetReport patientId={identity.id} name={identity.name} />}
       </div>
       <div className="dashboard-grid comparison">
         <Card>
