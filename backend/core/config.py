@@ -15,6 +15,7 @@ class Settings:
     signup_supervisor_id: str = field(default_factory=lambda: os.getenv('SIGNUP_SUPERVISOR_ID', 'meera'))
     assistant_model: str = field(default_factory=lambda: os.getenv('ASSISTANT_MODEL', 'qwen2.5:7b-instruct'))
     token_minutes: int = 60
+    cors_allow_localhost: bool = field(default_factory=lambda: os.getenv('CORS_ALLOW_LOCALHOST', 'false').lower() == 'true')
     origins: list[str] = field(default_factory=lambda: [s.strip() for s in os.getenv('CORS_ORIGINS', 'http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174').split(',') if s.strip()])
     max_audio_bytes: int = 10 * 1024 * 1024
     pipeline_timeout: int = 180

@@ -27,7 +27,7 @@ def create_app(settings=None):
     app.state.settings=settings
     app.state.engine=engine
     app.state.sessions=sessionmaker(engine,expire_on_commit=False)
-    app.add_middleware(CORSMiddleware,allow_origins=settings.origins,allow_credentials=False,allow_methods=['GET','POST','PATCH'],allow_headers=['Authorization','Content-Type'])
+    app.add_middleware(CORSMiddleware,allow_origins=settings.origins,allow_origin_regex=r'^https?://(localhost|127\.0\.0\.1)(:[0-9]+)?$' if settings.cors_allow_localhost else None,allow_credentials=False,allow_methods=['GET','POST','PATCH'],allow_headers=['Authorization','Content-Type'])
     @app.exception_handler(StarletteHTTPException)
     async def http_error(request, exc):
         body=exc.detail if isinstance(exc.detail,dict) else {'error':f'HTTP_{exc.status_code}','message':exc.detail}
