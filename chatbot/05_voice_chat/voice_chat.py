@@ -19,26 +19,38 @@ questions and neither replaces the other:
      and (if warranted) a supervisor alert. This is cross-session and this
      script cannot do it alone; only intelligence_model has the history.
 
-Case context (--case-facts):
-  If given a path to a patient's case_facts.json (produced by
-  06_case_profile), its contents are rendered into the system prompt at
-  session start so the patient doesn't have to re-explain their FIR, an
-  upcoming hearing, etc. At session end, the full conversation is fed back
-  through the same extract/merge/summarize logic used for direct profile
-  edits, and the file is updated. This is the chatbot's "memory" — instead
-  of recalling old conversation turns directly, whatever it learns gets
-  folded into case_facts, which gets reloaded next session.
+Case context (automatic, via the shared patient registry):
+  [INTEGRATION] case_facts.json is no longer passed in by hand via a
+  --case-facts flag. Instead, at session start, this script looks up
+  patient_id in the shared patient registry (see patient_registry.py --
+  a small table in the same still.db intelligence_model already owns) to
+  find that patient's case_facts.json path, if one has ever been
+  registered for them (via case_profile.py --patient-id --output). If
+  none is found, the session proceeds with no case context, exactly as if
+  --case-facts had been omitted before this change -- this is not an
+  error, just means this patient has no case profile on file yet.
+  Its contents are rendered into the system prompt at session start so
+  the patient doesn't have to re-explain their FIR, an upcoming hearing,
+  etc. At session end, the full conversation is fed back through the same
+  extract/merge/summarize logic used for direct profile edits, and the
+  file (at its already-registered path) is updated in place. This is the
+  chatbot's "memory" — instead of recalling old conversation turns
+  directly, whatever it learns gets folded into case_facts, which gets
+  reloaded next session. A human no longer needs to remember or type the
+  correct file path every time -- only --patient-id is needed.
 
 [INTEGRATION] --patient-id (required):
   There is no auth/login system yet, so patient identity is passed
   explicitly on the command line rather than resolved from a session/token.
-  This is the same patient whose case_facts.json you pass to --case-facts.
+  This is the same patient_id you passed to case_profile.py --patient-id
+  when that patient's case profile was created/updated.
   session_id is generated fresh, once, per run of this script -- one
   session = one run = one uuid.
 
 Usage:
     python voice_chat.py --patient-id patient_001
-    python voice_chat.py --patient-id patient_001 --case-facts ../06_case_profile/output/case_facts.json
+    (case_facts.json, if any exists for this patient, is now found automatically --
+     see the patient registry note above. --case-facts is no longer needed.)
 """
 
 import json
@@ -65,6 +77,12 @@ from transformers import pipeline
 # These are the only two functions this script needs from that repo.
 from pipeline.ingest import ingest_turn, end_session_and_run
 from schemas.schemas import ArousalFeatures, ArousalLabel, EmotionScores, TurnRecord
+
+# [INTEGRATION] shared patient_id -> case_facts_path registry (fixes the
+# "human has to remember which case_facts_*.json belongs to which patient"
+# gap). See patient_registry.py -- copy it alongside this script, or
+# wherever your PYTHONPATH already resolves it from.
+from patient_registry import lookup_case_facts_path
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 OLLAMA_URL = "http://localhost:11434/api/chat"
@@ -663,20 +681,23 @@ if __name__ == "__main__":
         required=True,
         help="[INTEGRATION] Identity of the patient having this session. No auth system "
              "exists yet, so this is passed explicitly. Should match the patient whose "
-             "case_facts.json is passed to --case-facts, if any.",
-    )
-    parser.add_argument(
-        "--case-facts",
-        help="Path to this patient's case_facts.json (from 06_case_profile). "
-             "If given, its contents are injected into the chat as context at "
-             "session start, and the file is updated with anything new "
-             "mentioned during the session.",
+             "case profile was registered via case_profile.py --patient-id, if any.",
     )
     args = parser.parse_args()
 
-    case_facts = load_case_facts(args.case_facts)
-    if args.case_facts and case_facts is None:
-        print(f"[warn] --case-facts path given but not found or empty: {args.case_facts}")
+    # [INTEGRATION] Look up this patient's case_facts path automatically
+    # instead of requiring a --case-facts flag typed in by hand. Returns
+    # None if this patient has never had a case profile registered --
+    # that's a normal, expected state (new patient, or one with no case
+    # profile yet), not an error.
+    case_facts_path = lookup_case_facts_path(args.patient_id)
+    if case_facts_path is None:
+        print(f"[integration] No case profile registered yet for patient_id={args.patient_id} -- "
+              f"proceeding with no case context.")
+
+    case_facts = load_case_facts(case_facts_path)
+    if case_facts_path and case_facts is None:
+        print(f"[warn] Registered case_facts path not found or empty: {case_facts_path}")
 
     context_block = build_context_block(case_facts)
     system_prompt = (
@@ -693,11 +714,11 @@ if __name__ == "__main__":
         print("No turns recorded, nothing to report on.")
         sys.exit(0)
 
-    if args.case_facts:
+    if case_facts_path:
         updated_facts = update_case_facts_from_session(turns, case_facts)
-        with open(args.case_facts, "w", encoding="utf-8") as f:
+        with open(case_facts_path, "w", encoding="utf-8") as f:
             json.dump(updated_facts, f, indent=2)
-        print(f"\nCase facts updated: {args.case_facts}")
+        print(f"\nCase facts updated: {case_facts_path}")
 
     # [INTEGRATION] Trigger the full Modules 11-17 chain now that the
     # session is over. This is the exact "who decides a session ended"
