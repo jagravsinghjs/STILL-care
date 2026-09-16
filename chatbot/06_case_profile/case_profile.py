@@ -12,8 +12,17 @@ Two tiers, by design:
      This keeps the expensive call rare, so it's fine even on mid-range
      local hardware.
 
+[INTEGRATION] --patient-id (required):
+  After writing --output, this now registers (patient_id -> output path)
+  in the shared patient registry (see patient_registry.py) so voice_chat.py
+  can look the path up automatically instead of requiring a human to
+  remember and re-type it via --case-facts every time. This is the fix for
+  the "filenames-in-a-folder, not a real patient registry" gap -- it's a
+  small addition to the same still.db intelligence_model already owns, not
+  a new database.
+
 Usage:
-    python case_profile_extraction.py --input profile_text.txt --output case_facts.json
+    python case_profile.py --input profile_text.txt --output case_facts.json --patient-id patient_001
 
 Requirements:
     pip install spacy ollama
@@ -24,7 +33,14 @@ Requirements:
 import re
 import json
 import argparse
+import os
 from datetime import datetime, timezone
+
+# [INTEGRATION] shared patient_id -> case_facts_path registry.
+# See patient_registry.py -- copy it into this same folder (or wherever your
+# PYTHONPATH picks it up), same pattern as voice_chat.py's existing
+# sys.path.insert() for case_profile.py itself.
+from patient_registry import register_case_facts_path
 
 try:
     import spacy
@@ -275,6 +291,19 @@ if __name__ == "__main__":
     parser.add_argument("--existing", help="Path to existing case_facts.json for this patient, if any")
     parser.add_argument("--output", default="case_facts.json", help="Where to write the merged JSON")
     parser.add_argument("--model", default="qwen2.5:7b-instruct", help="Ollama model for narrative extraction")
+    parser.add_argument(
+        "--patient-id",
+        required=True,
+        help="[INTEGRATION] Registers this patient_id -> --output path in the shared "
+             "patient registry (still.db's 'patients' table), so voice_chat.py can look "
+             "up the case-facts path automatically instead of needing --case-facts typed "
+             "in by hand every session.",
+    )
+    parser.add_argument(
+        "--display-name",
+        help="[INTEGRATION] Optional human-readable name to store alongside patient_id "
+             "in the registry, purely for a human/dashboard to read later.",
+    )
     args = parser.parse_args()
 
     with open(args.input, "r", encoding="utf-8") as f:
@@ -289,5 +318,13 @@ if __name__ == "__main__":
 
     with open(args.output, "w", encoding="utf-8") as f:
         json.dump(merged, f, indent=2)
+
+    # [INTEGRATION] Register this patient's case_facts path so voice_chat.py
+    # doesn't need --case-facts typed in by hand. Uses an absolute path so
+    # the lookup works correctly regardless of which folder voice_chat.py is
+    # later run from.
+    absolute_output_path = os.path.abspath(args.output)
+    register_case_facts_path(args.patient_id, absolute_output_path, display_name=args.display_name)
+    print(f"\n[integration] Registered case_facts path for patient_id={args.patient_id}: {absolute_output_path}")
 
     print(json.dumps(merged, indent=2))

@@ -1,0 +1,26 @@
+{
+  "fir_number": "88/2026",
+  "sections": [
+    "354 IPC"
+  ],
+  "case_type": "null",
+  "hearing_events": [
+    {
+      "date": "20/11/2026",
+      "type": "next_hearing",
+      "outcome": null,
+      "notes": null
+    },
+    {
+      "date": "02/01/2026",
+      "type": null,
+      "outcome": null,
+      "notes": "date detected but not classified"
+    }
+  ],
+  "threats_mentioned": [
+    "someone watching my house on two occasions in the past month"
+  ],
+  "status_summary": "The case, identified by number 88/2026, involves charges under section 354 IPC but the case type is still undefined. The next hearing is scheduled for November 20, 2026, and as of the last update, there have been no outcomes reported. There are ongoing concerns about someone watching the patient's house on two occasions in the past month.",
+  "last_updated": "2026-09-16T01:42:48.413584+00:00"
+}
