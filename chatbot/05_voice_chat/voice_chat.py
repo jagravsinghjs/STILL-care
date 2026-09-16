@@ -3,11 +3,21 @@ voice_chat.py
 Live, voice-based conversation with the assistant. Per turn:
   record -> transcribe (faster-whisper) -> acoustic features (librosa)
   -> text emotion (j-hartmann) -> conversational reply (Ollama)
+  -> [INTEGRATION] push turn to intelligence_model via ingest_turn()
 Raw audio is NEVER written to disk or kept after a turn is processed —
 only the transcript text, extracted features, and eventual report persist.
 
-At the end of the session (you choose to stop between turns), a report
-is generated automatically and saved to output/session_<timestamp>/.
+At the end of the session (you choose to stop between turns), TWO
+separate reports are generated, on purpose -- they answer different
+questions and neither replaces the other:
+  1. This script's own report.json + mental_state.png -- a THIS-SESSION-ONLY
+     turn-by-turn distress read and a warm patient-facing closing message.
+     Saved to output/session_<timestamp>/.
+  2. [INTEGRATION] intelligence_model's Modules 11-17 chain, triggered via
+     end_session_and_run() -- computes this session's summary, THEN looks
+     across the patient's last 10 sessions for a trend, risk score, tier,
+     and (if warranted) a supervisor alert. This is cross-session and this
+     script cannot do it alone; only intelligence_model has the history.
 
 Case context (--case-facts):
   If given a path to a patient's case_facts.json (produced by
@@ -19,9 +29,16 @@ Case context (--case-facts):
   of recalling old conversation turns directly, whatever it learns gets
   folded into case_facts, which gets reloaded next session.
 
+[INTEGRATION] --patient-id (required):
+  There is no auth/login system yet, so patient identity is passed
+  explicitly on the command line rather than resolved from a session/token.
+  This is the same patient whose case_facts.json you pass to --case-facts.
+  session_id is generated fresh, once, per run of this script -- one
+  session = one run = one uuid.
+
 Usage:
-    python voice_chat.py
-    python voice_chat.py --case-facts ../06_case_profile/output/case_facts.json
+    python voice_chat.py --patient-id patient_001
+    python voice_chat.py --patient-id patient_001 --case-facts ../06_case_profile/output/case_facts.json
 """
 
 import json
@@ -29,7 +46,8 @@ import os
 import re
 import sys
 import time
-from datetime import datetime
+import uuid
+from datetime import datetime, timezone
 
 import numpy as np
 import requests
@@ -42,6 +60,11 @@ import matplotlib.pyplot as plt
 
 from faster_whisper import WhisperModel
 from transformers import pipeline
+
+# [INTEGRATION] intelligence_model's public contract -- see INTEGRATION.md.
+# These are the only two functions this script needs from that repo.
+from pipeline.ingest import ingest_turn, end_session_and_run
+from schemas.schemas import ArousalFeatures, ArousalLabel, EmotionScores, TurnRecord
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 OLLAMA_URL = "http://localhost:11434/api/chat"
@@ -60,6 +83,20 @@ WHISPER_LANGUAGE = "en"  # set to None for auto-detect / adjust for multilingual
 NO_SPEECH_PROB_THRESHOLD = 0.6
 LOGPROB_THRESHOLD = -1.0
 COMPRESSION_RATIO_THRESHOLD = 2.4
+
+# [INTEGRATION] classify_arousal() below returns three string buckets that
+# don't line up 1:1 in meaning with ArousalLabel's three enum members.
+# LOW/HIGH map cleanly; "neutral" has no honest match (it means "no clear
+# signal either way", not "medium arousal") but ArousalLabel has no
+# NEUTRAL/UNKNOWN option, so by convention it's treated as MODERATE -- the
+# closest available meaning to "inconclusive". This is a real, deliberate
+# choice, not a placeholder -- revisit only by widening classify_arousal()'s
+# thresholds if "neutral" ends up too large a bucket in practice.
+AROUSAL_LABEL_MAP = {
+    "low_arousal": ArousalLabel.LOW,
+    "neutral": ArousalLabel.MODERATE,
+    "high_arousal": ArousalLabel.HIGH,
+}
 
 # ------------------------------------------------------------------
 # Case-context integration (06_case_profile)
@@ -346,6 +383,45 @@ def classify_arousal(features):
     return "neutral"
 
 
+# [INTEGRATION] Build a TurnRecord and push it to intelligence_model.
+# Called once per turn, right after the turn's own acoustic/emotion/text
+# data is assembled -- see the call site inside run_conversation().
+def push_turn_to_intelligence_model(session_id, patient_id, turn_text, acoustic, arousal, text_emotion):
+    arousal_label = AROUSAL_LABEL_MAP.get(arousal, ArousalLabel.MODERATE)
+
+    turn_record = TurnRecord(
+        turn_id=str(uuid.uuid4()),
+        session_id=session_id,
+        patient_id=patient_id,
+        timestamp=datetime.now(timezone.utc),
+        transcript=turn_text,
+        arousal=ArousalFeatures(
+            pitch_mean=acoustic.get("pitch_mean_hz", 0.0),
+            pitch_std=acoustic.get("pitch_std_hz", 0.0),
+            energy=acoustic.get("energy_mean", 0.0),
+            zero_crossing_rate=acoustic.get("zero_crossing_rate", 0.0),
+            pause_ratio=acoustic.get("pause_ratio", 0.0),
+            arousal_label=arousal_label,
+        ),
+        emotion=EmotionScores(
+            anger=text_emotion.get("anger", 0.0),
+            disgust=text_emotion.get("disgust", 0.0),
+            fear=text_emotion.get("fear", 0.0),
+            joy=text_emotion.get("joy", 0.0),
+            neutral=text_emotion.get("neutral", 0.0),
+            sadness=text_emotion.get("sadness", 0.0),
+            surprise=text_emotion.get("surprise", 0.0),
+        ),
+    )
+    try:
+        ingest_turn(turn_record)
+    except Exception as e:
+        # Fail soft, same philosophy as the case_profile JSON-parse fallback
+        # below -- a stalled or unreachable intelligence_model must never
+        # break the live conversation the patient is having right now.
+        print(f"[warn] ingest_turn() failed, this turn will be missing from intelligence_model: {e}")
+
+
 # ------------------------------------------------------------------
 # Ollama call
 # ------------------------------------------------------------------
@@ -425,11 +501,16 @@ def should_nudge_toward_doctor(turns):
 # Main conversation loop
 # ------------------------------------------------------------------
 
-def run_conversation(whisper_model, emotion_classifier, temp_dir, system_prompt=CONVO_SYSTEM_PROMPT):
+def run_conversation(whisper_model, emotion_classifier, temp_dir, patient_id, system_prompt=CONVO_SYSTEM_PROMPT):
     print("\nSession started. After each reply, press Enter to keep talking, or type 'report' to end and generate the report.\n")
 
     os.makedirs(temp_dir, exist_ok=True)
     temp_path = os.path.join(temp_dir, "turn_tmp.wav")
+
+    # [INTEGRATION] One session_id per run of this script. Generated here,
+    # not passed in -- there's no upstream system yet that hands one out.
+    session_id = str(uuid.uuid4())
+    print(f"[integration] session_id = {session_id} (patient_id = {patient_id})\n")
 
     messages = []
     turns = []
@@ -474,6 +555,12 @@ def run_conversation(whisper_model, emotion_classifier, temp_dir, system_prompt=
 
         os.remove(temp_path)  # done with the audio — comment this out if you want to keep turn recordings
 
+        # [INTEGRATION] Push this turn to intelligence_model immediately --
+        # per turn, not batched at session end. intelligence_model only
+        # needs a plain database write here; it does no scoring per turn
+        # itself (that happens later, all at once, in end_session_and_run).
+        push_turn_to_intelligence_model(session_id, patient_id, turn_text, acoustic, arousal, text_emotion)
+
         context_note = (
             f"[voice cues: pitch_std={acoustic.get('pitch_std_hz', 0)}, "
             f"energy_std={acoustic.get('energy_std', 0)}, "
@@ -501,11 +588,12 @@ def run_conversation(whisper_model, emotion_classifier, temp_dir, system_prompt=
         if action == "report":
             break
 
-    return turns
+    return turns, session_id
 
 
 # ------------------------------------------------------------------
-# Report generation
+# Report generation (voice_chat's OWN, single-session report --
+# separate from, and complementary to, intelligence_model's chain)
 # ------------------------------------------------------------------
 
 def generate_report(turns, output_dir):
@@ -571,6 +659,13 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Run a voice check-in session")
     parser.add_argument(
+        "--patient-id",
+        required=True,
+        help="[INTEGRATION] Identity of the patient having this session. No auth system "
+             "exists yet, so this is passed explicitly. Should match the patient whose "
+             "case_facts.json is passed to --case-facts, if any.",
+    )
+    parser.add_argument(
         "--case-facts",
         help="Path to this patient's case_facts.json (from 06_case_profile). "
              "If given, its contents are injected into the chat as context at "
@@ -590,7 +685,9 @@ if __name__ == "__main__":
 
     whisper_model, emotion_classifier = load_models()
     temp_dir = os.path.join(SCRIPT_DIR, "tmp")
-    turns = run_conversation(whisper_model, emotion_classifier, temp_dir, system_prompt=system_prompt)
+    turns, session_id = run_conversation(
+        whisper_model, emotion_classifier, temp_dir, args.patient_id, system_prompt=system_prompt
+    )
 
     if not turns:
         print("No turns recorded, nothing to report on.")
@@ -602,6 +699,22 @@ if __name__ == "__main__":
             json.dump(updated_facts, f, indent=2)
         print(f"\nCase facts updated: {args.case_facts}")
 
+    # [INTEGRATION] Trigger the full Modules 11-17 chain now that the
+    # session is over. This is the exact "who decides a session ended"
+    # trigger point INTEGRATION.md calls out as open/unbuilt -- it's the
+    # user typing 'report', right here.
+    try:
+        pipeline_result = end_session_and_run(
+            session_id=session_id,
+            end_time=datetime.now(timezone.utc),
+            turn_count=len(turns),
+        )
+        print(f"\n[integration] intelligence_model pipeline result: {pipeline_result}")
+    except Exception as e:
+        print(f"[warn] end_session_and_run() failed -- this session will be missing from "
+              f"intelligence_model's trend/risk/alert chain: {e}")
+
+    # voice_chat's OWN report -- separate artifact, same as before.
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_dir = os.path.join(SCRIPT_DIR, "output", f"session_{timestamp}")
     generate_report(turns, output_dir)
