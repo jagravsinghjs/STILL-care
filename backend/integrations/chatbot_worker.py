@@ -13,7 +13,8 @@ def load(path,name):
     return module
 
 def run(payload):
-    root=Path(payload['root'])/'chatbot'
+    # Pipeline stages live at the project root after the frontend/backend reorganisation.
+    root=Path(payload['root'])
     llm=load(root/'04_chat_llm/chat_llm.py','still_chat_llm')
     # Never import 01_speech_to_text/whisper.py: it runs CUDA and fixed-file I/O on import.
     if payload.get('audio_path'):

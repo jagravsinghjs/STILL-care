@@ -1,0 +1,11 @@
+# Install into the existing backend virtual environment; keeps its API versions.
+-r requirements.txt
+numpy
+reportlab
+requests
+matplotlib
+torch
+transformers>=4.40,<5
+faster-whisper
+librosa
+soundfile
