@@ -35,28 +35,16 @@ describe("backend reflection contract", () => {
       identity: { id: "ananya", name: "Ananya Sharma", role: "STUDENT" },
       role: "user",
     });
-    const fetcher = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            id: "server-id",
-            created_at: "2026-09-15T00:00:00Z",
-            mode: "voice",
-            summary: "A new check-in",
-          }),
-          { status: 201, headers: { "Content-Type": "application/json" } },
-        ),
-      );
+    const fetcher = vi.spyOn(globalThis, "fetch").mockImplementation(async (url) => {
+      if (String(url).endsWith("/api/chat/sessions")) return new Response(JSON.stringify({ session_id: "session-1" }), { status: 201 });
+      if (String(url).endsWith("/text-turns")) return new Response(JSON.stringify({ turn_id: "server-id", transcript: "A personal reflection", reply: "Thank you for sharing." }), { status: 200 });
+      return new Response(JSON.stringify({ session_id: "session-1", ended: true }), { status: 200 });
+    });
     const entry = await createReflection(" A personal reflection ", "Voice");
     expect(entry.id).toBe("server-id");
     expect(entry.raw).toBe("A personal reflection");
     expect(entry.mode).toBe("Voice");
-    expect(JSON.parse(fetcher.mock.calls[0][1]!.body as string)).toEqual({
-      patient_id: "ananya",
-      mode: "voice",
-      content: "A personal reflection",
-    });
+    expect(String(fetcher.mock.calls[1][0])).toMatch(/text-turns$/);
   });
 });
 

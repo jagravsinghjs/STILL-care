@@ -1,51 +1,29 @@
 import { useState } from "react";
-import { PenLine, Mic, ChevronDown } from "lucide-react";
+import { ChevronDown, FileText } from "lucide-react";
 import { useApp } from "../../store/useApp";
+import { request } from "../../api/client";
 import { dateLabel } from "../../utils/date";
 import { Card } from "../../components/ui";
+
 export function History() {
-  const entries = useApp((s) => s.reflections);
+  const entries = useApp((s) => s.reports);
   const [open, setOpen] = useState<string | null>(null);
-  return (
-    <>
-      <div className="eyebrow">YOUR CONTINUITY</div>
-      <h1>Your history</h1>
-      <p className="lead">Review your previous check-ins.</p>
-      <Card>
-        <div className="section-heading">
-          <h2>Your check-ins</h2>
-          <span>Most recent first</span>
-        </div>
-        {entries.length === 0 && <p className="muted">No check-ins yet.</p>}
-        {entries.map((r) => (
-          <article className="history-item" key={r.id}>
-            <span className="tile-icon lavender">
-              {r.mode === "Written" ? <PenLine size={19} /> : <Mic size={19} />}
-            </span>
-            <div className="grow">
-              <div className="muted small-text">
-                {dateLabel(r.date)} · {r.mode}
-              </div>
-              <h3>{r.observation}</h3>
-              <button
-                className="text-link"
-                aria-expanded={open === r.id}
-                onClick={() => setOpen(open === r.id ? null : r.id)}
-              >
-                {open === r.id ? "Hide details" : "View details"}
-                <ChevronDown size={15} />
-              </button>
-              {open === r.id && (
-                <div className="private-detail">
-                  <span className="eyebrow">YOUR PRIVATE REFLECTION</span>
-                  <p className="reflection-text">{r.raw}</p>
-                  <small>This text does not appear in counsellor views.</small>
-                </div>
-              )}
-            </div>
-          </article>
-        ))}
-      </Card>
-    </>
-  );
+  const [reports, setReports] = useState<Record<string, unknown>>({});
+  const [error, setError] = useState("");
+  async function toggle(id: string) {
+    if (open === id) return setOpen(null);
+    setOpen(id); setError("");
+    if (!reports[id]) {
+      try { const report = await request(`/api/patients/me/sessions/${id}/report`); setReports((current) => ({ ...current, [id]: report })); }
+      catch (e) { setError(e instanceof Error ? e.message : "Unable to load this report."); }
+    }
+  }
+  return <>
+    <div className="eyebrow">YOUR CONTINUITY</div><h1>Your history</h1><p className="lead">Review your previous processed sessions and reports.</p>
+    <Card><div className="section-heading"><h2>Your sessions</h2><span>Most recent first</span></div>
+      {!entries.length && <p className="muted">No completed sessions yet.</p>}
+      {entries.map((entry) => <article className="history-item" key={entry.id}><span className="tile-icon lavender"><FileText size={19} /></span><div className="grow"><div className="muted small-text">{dateLabel(entry.created_at)} · {entry.summary}</div><button className="text-link" aria-expanded={open === entry.id} onClick={() => toggle(entry.id)}>{open === entry.id ? "Hide report" : "View report"}<ChevronDown size={15} /></button>{open === entry.id && <div className="private-detail"><pre className="reflection-text">{JSON.stringify(reports[entry.id] ?? {}, null, 2)}</pre><small>Your report is private to you.</small></div>}</div></article>)}
+      {error && <p className="form-error" role="alert">{error}</p>}
+    </Card>
+  </>;
 }

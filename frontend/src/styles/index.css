@@ -1903,3 +1903,7 @@ body {
 }
 
 @media(min-width:761px){.assistant-log{height:clamp(180px,26vh,300px)}.assistant-heading{margin-bottom:18px}.assistant-heading h1{font-size:32px}.assistant-chat-header{padding:16px 18px}}
+ .status-dot { display:inline-block; width:.6rem; height:.6rem; border-radius:50%; margin-right:.4rem; background:#9aa39b; vertical-align:middle; }
+ .status-dot.green { background:#52765b; }
+ .status-dot.yellow { background:#a5762b; }
+ .status-dot.red { background:#a34e42; }

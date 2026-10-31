@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, status
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .auth import (
@@ -19,8 +22,8 @@ from .auth import (
 )
 from .database import initialize_schema, transaction
 from .case_context import save_case_context
-from .read_models import report_for_patient, report_for_supervisor, status_for, trend_for
-from .chat_service import end_session, generate_and_persist_reply, owned_open_session, persist_turn, process_audio, start_session
+from .read_models import patients_for_supervisor, report_for_patient, report_for_supervisor, sessions_for, status_for, summaries_for, trend_for
+from .chat_service import end_session, generate_and_persist_reply, owned_open_session, persist_text_turn, persist_turn, process_audio, start_session
 
 
 @asynccontextmanager
@@ -30,6 +33,16 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="STILL-care API", lifespan=lifespan)
+
+# Allow the Vite dev server (or any origin) to talk to the API during development.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 bearer_scheme = HTTPBearer(auto_error=False)
 
 
@@ -86,6 +99,10 @@ class TurnResponse(BaseModel):
     turn_id: str
     transcript: str
     reply: str
+
+
+class TextTurnRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=10_000)
 
 
 def current_identity(
@@ -200,6 +217,25 @@ async def upload_audio_turn(session_id: str, audio: UploadFile = File(...), iden
     return {"turn_id": turn_id, "transcript": transcript, "reply": reply}
 
 
+@app.post("/api/chat/sessions/{session_id}/text-turns", response_model=TurnResponse)
+def upload_text_turn(session_id: str, payload: TextTurnRequest, identity: IdentityResponse = Depends(current_identity)) -> dict:
+    if identity.role != "STUDENT":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Patient access is required.")
+    try:
+        with transaction() as conn:
+            if owned_open_session(conn, identity.id, session_id) is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Open session not found.")
+            turn_id = persist_text_turn(conn, session_id=session_id, patient_id=identity.id, text=payload.text)
+            reply = generate_and_persist_reply(conn, session_id=session_id, patient_id=identity.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="The assistant is temporarily unavailable. Please try again.") from exc
+    return {"turn_id": turn_id, "transcript": payload.text.strip(), "reply": reply}
+
+
 @app.post("/api/chat/sessions/{session_id}/end")
 def finish_chat_session(session_id: str, identity: IdentityResponse = Depends(current_identity)) -> dict:
     if identity.role != "STUDENT":
@@ -230,6 +266,14 @@ def patient_trend(identity: IdentityResponse = Depends(current_identity)) -> lis
         return trend_for(conn, identity.id)
 
 
+@app.get("/api/patients/me/sessions")
+def patient_sessions(identity: IdentityResponse = Depends(current_identity)) -> list[dict]:
+    if identity.role != "STUDENT":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Patient access is required.")
+    with transaction() as conn:
+        return sessions_for(conn, identity.id)
+
+
 @app.get("/api/patients/me/sessions/{session_id}/report")
 def patient_report(session_id: str, identity: IdentityResponse = Depends(current_identity)) -> dict:
     if identity.role != "STUDENT":
@@ -248,6 +292,21 @@ def supervisor_status(patient_id: str, identity: IdentityResponse = Depends(curr
         return status_for(conn, patient_id)
 
 
+@app.get("/api/supervisor/patients")
+def supervisor_patients(identity: IdentityResponse = Depends(current_identity)) -> list[dict]:
+    if identity.role != "SUPERVISOR":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Supervisor access is required.")
+    with transaction() as conn:
+        return patients_for_supervisor(conn, identity.id)
+
+
+@app.get("/api/supervisor/patients/{patient_id}/summaries")
+def supervisor_summaries(patient_id: str, identity: IdentityResponse = Depends(current_identity)) -> list[dict]:
+    with transaction() as conn:
+        authorize_patient_read(conn, identity, patient_id)
+        return summaries_for(conn, patient_id)
+
+
 @app.get("/api/supervisor/patients/{patient_id}/trend", response_model=list[TrendPoint])
 def supervisor_trend(patient_id: str, identity: IdentityResponse = Depends(current_identity)) -> list[dict]:
     with transaction() as conn:
@@ -263,3 +322,9 @@ def supervisor_report(patient_id: str, session_id: str, identity: IdentityRespon
     if report is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No report is available for this session.")
     return report
+
+# ── Serve the built React frontend ───────────────────────────────────
+# This mount MUST come after all API routes so it doesn't shadow them.
+_frontend_dist = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+if _frontend_dist.is_dir():
+    app.mount("/", StaticFiles(directory=str(_frontend_dist), html=True), name="frontend")

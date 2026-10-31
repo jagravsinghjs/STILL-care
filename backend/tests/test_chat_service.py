@@ -37,6 +37,10 @@ class ChatSessionServiceTests(unittest.TestCase):
             end_session(self.conn, session_id)
         run.assert_called_once()
         self.assertEqual(run.call_args.args[0], session_id)
+        self.assertIsNone(owned_open_session(self.conn, "chat-patient", session_id))
+
+        with self.assertRaises(ValueError):
+            end_session(self.conn, session_id)
 
     @patch("backend.chat_service.requests.post")
     def test_persists_assistant_reply_without_exposing_it_to_intelligence_turns(self, post) -> None:

@@ -1,6 +1,7 @@
 import type { ApiSummary } from "../../api/client";
 import { Card } from "../../components/ui";
 import { dateLabel } from "../../utils/date";
+import type { ApiTrendPoint } from "../../api/client";
 export const stateLabel = {
   GREEN: "GREEN · Routine support",
   YELLOW: "YELLOW · Follow-up",
@@ -8,7 +9,10 @@ export const stateLabel = {
 };
 const height = { GREEN: 150, YELLOW: 95, RED: 40 };
 const color = { GREEN: "#52765b", YELLOW: "#a5762b", RED: "#a34e42" };
-export function ProgressChart({ reports }: { reports: ApiSummary[] }) {
+export function ProgressChart({ reports, trend = [] }: { reports: ApiSummary[]; trend?: ApiTrendPoint[] }) {
+  if (trend.length) {
+    return <Card className="progress-card"><div className="section-heading"><h2>Change over time</h2><span>Distress trend</span></div><p className="muted small-text">Cross-session trend computed by STILL’s intelligence model.</p><ol className="progress-labels">{trend.map((point) => <li key={point.computed_at}><strong>{dateLabel(point.computed_at)}</strong><p>{point.trend_label.replaceAll("_", " ")} · confidence {Math.round(point.confidence * 100)}%</p></li>)}</ol></Card>;
+  }
   const points = [...reports].reverse().slice(-8);
   const x = (i: number) =>
     points.length === 1 ? 440 : 210 + (i * 440) / (points.length - 1);

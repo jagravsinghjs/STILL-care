@@ -128,4 +128,29 @@ def end_session(conn: sqlite3.Connection, session_id: str) -> None:
     count = conn.execute("SELECT COUNT(*) FROM turns WHERE session_id = ?", (session_id,)).fetchone()[0]
     if count == 0:
         raise ValueError("A session needs at least one turn before it can end.")
-    end_session_and_run(session_id, datetime.now(timezone.utc), count, conn=conn)
+    end_time = datetime.now(timezone.utc)
+    updated = conn.execute(
+        "UPDATE sessions SET end_time = ?, turn_count = ? WHERE session_id = ? AND end_time IS NULL",
+        (end_time.isoformat(), count, session_id),
+    ).rowcount
+    if updated != 1:
+        raise ValueError("Session is already closed or does not exist.")
+    end_session_and_run(session_id, end_time, count, conn=conn)
+
+
+def persist_text_turn(conn: sqlite3.Connection, *, session_id: str, patient_id: str, text: str) -> str:
+    """Persist typed input through the same intelligence pipeline as voice turns."""
+    text = text.strip()
+    if not text:
+        raise ValueError("Message cannot be empty.")
+    return persist_turn(
+        conn,
+        session_id=session_id,
+        patient_id=patient_id,
+        transcript=text,
+        arousal=ArousalFeatures(
+            pitch_mean=0, pitch_std=0, energy=0, zero_crossing_rate=0,
+            pause_ratio=0, arousal_label=ArousalLabel.MODERATE,
+        ),
+        emotion=EmotionScores(anger=0, disgust=0, fear=0, joy=0, neutral=1, sadness=0, surprise=0),
+    )

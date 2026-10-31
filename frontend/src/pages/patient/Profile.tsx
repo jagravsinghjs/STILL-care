@@ -1,70 +1,13 @@
+import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { ArrowRight, LogOut } from "lucide-react";
 import { Card, Button } from "../../components/ui";
+import { request } from "../../api/client";
 import { useApp } from "../../store/useApp";
+
 export function Profile({ supervisor = false }: { supervisor?: boolean }) {
-  const account = useApp((s) => s.identity);
-  const supervisorName = useApp((s) => s.supervisorName);
-  const logout = useApp((s) => s.logout);
-  const navigate = useNavigate();
-  return (
-    <div className="narrow">
-      <span className="eyebrow">
-        {supervisor ? "YOUR SUPPORT CONNECTION" : "YOUR PERSONAL SPACE"}
-      </span>
-      <h1>{supervisor ? "Your counsellor" : "Your profile."}</h1>
-      <p className="lead">
-        {supervisor
-          ? "Counsellor details and messaging."
-          : "The essentials, and clarity about your information."}
-      </p>
-      <Card>
-        <div className="supervisor-person">
-          <span className="avatar portrait">
-            {supervisor
-              ? supervisorName
-                  .split(" ")
-                  .map((n) => n[0])
-                  .slice(0, 2)
-                  .join("")
-              : (account?.name ?? "Ananya Sharma")
-                  .split(" ")
-                  .map((n) => n[0])
-                  .slice(0, 2)
-                  .join("")}
-          </span>
-          <div>
-            <h2>
-              {supervisor ? supervisorName : (account?.name ?? "Ananya Sharma")}
-            </h2>
-            <p className="muted">
-              {supervisor ? "Assigned supervisor" : "Personal wellbeing"}
-            </p>
-          </div>
-        </div>
-        {!supervisor && (
-          <dl>
-            <dt>User</dt>
-            <dd>{account?.name ?? "Ananya Sharma"}</dd>
-            <dt>Supervisor</dt>
-            <dd>{supervisorName}</dd>
-          </dl>
-        )}
-        <Link to="/patient/messages" className="button">
-          Message your supervisor <ArrowRight size={17} />
-        </Link>
-      </Card>
-      {!supervisor && (
-        <Button
-          className="secondary profile-logout"
-          onClick={() => {
-            logout();
-            navigate("/login");
-          }}
-        >
-          <LogOut size={17} /> Log out
-        </Button>
-      )}
-    </div>
-  );
+  const account = useApp((s) => s.identity); const supervisorName = useApp((s) => s.supervisorName); const logout = useApp((s) => s.logout); const navigate = useNavigate();
+  const [details, setDetails] = useState(""); const [busy, setBusy] = useState(false); const [message, setMessage] = useState("");
+  async function save(e: React.FormEvent) { e.preventDefault(); if (!details.trim()) return; setBusy(true); setMessage(""); try { await request("/api/patients/me/case-context", { method: "PUT", body: JSON.stringify({ case_details: details }) }); setMessage("Case context saved. It will inform your next session."); } catch (error) { setMessage(error instanceof Error ? error.message : "Unable to save case context."); } finally { setBusy(false); } }
+  return <div className="narrow"><span className="eyebrow">{supervisor ? "YOUR SUPPORT CONNECTION" : "YOUR PERSONAL SPACE"}</span><h1>{supervisor ? "Your counsellor" : "Your profile."}</h1><p className="lead">{supervisor ? "Counsellor details and messaging." : "Your account and private case context."}</p><Card><div className="supervisor-person"><span className="avatar portrait">{(supervisor ? supervisorName : account?.name ?? "").split(" ").map((n) => n[0]).slice(0, 2).join("")}</span><div><h2>{supervisor ? supervisorName || "Not assigned" : account?.name}</h2><p className="muted">{supervisor ? "Assigned supervisor" : "Personal wellbeing"}</p></div></div>{!supervisor && <><dl><dt>User</dt><dd>{account?.id}</dd></dl><form onSubmit={save}><label htmlFor="case-details">Case details for your future sessions</label><textarea id="case-details" rows={8} maxLength={20000} value={details} onChange={(e) => setDetails(e.target.value)} placeholder="FIR number, incident details, hearings, threats, or anything you want STILL to remember." /><p className="small-text muted">This context is private to you and is injected into your next chat session.</p><Button type="submit" disabled={busy || !details.trim()}>{busy ? "Saving…" : "Save case context"}</Button>{message && <p role="status">{message}</p>}</form></>}</Card>{supervisor && <Link to="/patient/messages" className="button">Message your supervisor <ArrowRight size={17} /></Link>}{!supervisor && <Button className="secondary profile-logout" onClick={() => { logout(); navigate("/login"); }}><LogOut size={17} /> Log out</Button>}</div>;
 }

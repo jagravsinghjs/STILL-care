@@ -13,13 +13,13 @@ describe('server-backed session',()=>{
  const summary={id:'one',patient_id:'student',mode:'written',created_at:'2026-09-15T00:00:00Z',summary:'Continuity update',attention_state:'YELLOW',trend:'WORSENING',themes:[],processing_mode:'mock'};
  vi.spyOn(globalThis,'fetch').mockImplementation(async(url)=>{
  const path=String(url);
- if(path.endsWith('/checkins'))return response([{...summary,raw_reflection:'PRIVATE_TEST'}]);
- if(path.endsWith('/messages'))return response([]);
- if(path.endsWith('/supervisor'))return response({id:'meera',name:'Test Supervisor',role:'SUPERVISOR'});
- return response({id:'student',name:'Test Student',initials:'TS',attention_state:'YELLOW',trend:'WORSENING',summary:'Continuity update'});
+ if(path.endsWith('/sessions'))return response([{session_id:'one',start_time:summary.created_at,end_time:summary.created_at,turn_count:1,mean_score:.5,max_score:.5,min_score:.5,volatility:0,within_session_trend:0,computed_at:summary.created_at}]);
+ if(path.endsWith('/status'))return response({tier:'yellow'});
+ if(path.endsWith('/trend'))return response([{computed_at:summary.created_at,trend_label:'worsening',slope:.1,confidence:.8,window_sessions:1}]);
+ return response([]);
  });
  useApp.setState({identity:{id:'student',name:'Test Student',role:'STUDENT'},role:'user'});
- await useApp.getState().refresh();expect(useApp.getState().reports).toEqual([summary]);expect(useApp.getState().reflections[0].raw).toBe('PRIVATE_TEST');
+ await useApp.getState().refresh();expect(useApp.getState().reports[0].id).toBe('one');expect(useApp.getState().status).toBe('yellow');
  useApp.getState().logout();expect(useApp.getState().reports).toEqual([]);expect(useApp.getState().reflections).toEqual([]);
  });
  it('registers through the backend without a browser-only account',async()=>{

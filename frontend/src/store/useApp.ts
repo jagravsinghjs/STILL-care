@@ -11,6 +11,8 @@ import {
   type ApiPatient,
   type ApiMessage,
   type ApiAlert,
+  type ApiSession,
+  type ApiTrendPoint,
 } from "../api/client";
 interface State {
   role: Role | null;
@@ -22,6 +24,8 @@ interface State {
   users: User[];
   summaries: Record<string, Continuity[]>;
   alerts: ApiAlert[];
+  trend: ApiTrendPoint[];
+  status: "green" | "yellow" | "red" | "not_assessed";
   followed: string[];
   error: string;
   login: (
@@ -45,6 +49,8 @@ const empty = {
   users: [],
   summaries: {},
   alerts: [],
+  trend: [],
+  status: "not_assessed" as const,
   followed: [],
   error: "",
 };
@@ -79,31 +85,35 @@ export const useApp = create<State>((set, get) => ({
     if (!identity) return;
     const same = () => get().identity === identity;
     if (identity.role === "STUDENT") {
-      const [history, messages, profile, supervisor] = await Promise.all([
-        request<(ApiSummary & { raw_reflection: string })[]>(
-          `/api/patients/${identity.id}/checkins`,
-        ),
-        request<ApiMessage[]>(`/api/patients/${identity.id}/messages`),
-        request<ApiPatient>(`/api/patients/${identity.id}`),
-        request<Identity>(`/api/patients/${identity.id}/supervisor`),
+      const [sessions, status, trend] = await Promise.all([
+        request<ApiSession[]>(`/api/patients/me/sessions`),
+        request<{ tier: "green" | "yellow" | "red" | "not_assessed" }>(`/api/patients/me/status`),
+        request<ApiTrendPoint[]>(`/api/patients/me/trend`),
       ]);
+      const history: ApiSummary[] = sessions.filter((s) => s.computed_at).map((s) => ({
+        id: s.session_id,
+        patient_id: identity.id,
+        mode: "voice",
+        created_at: s.computed_at ?? s.start_time,
+        summary: `${s.turn_count} processed turn${s.turn_count === 1 ? "" : "s"}`,
+        attention_state: status.tier === "not_assessed" ? "GREEN" : status.tier.toUpperCase() as ApiSummary["attention_state"],
+        trend: trend.length ? trend[trend.length - 1].trend_label === "improving" ? "IMPROVING" : trend[trend.length - 1].trend_label === "worsening" ? "WORSENING" : "NO_CLEAR_CHANGE" : "NO_CLEAR_CHANGE",
+        themes: [], processing_mode: "integrated",
+      }));
       if (same())
         set({
-          reports: history.map(({ raw_reflection, ...summary }) => summary),
-          reflections: history.map((r) => ({
-            ...toContinuity(r),
-            raw: r.raw_reflection,
-          })),
-          messages: messages.map(toMessage),
-          users: [toUser(profile)],
-          supervisorName: supervisor.name,
+          reports: history,
+          reflections: history.map((r) => ({ ...toContinuity(r), raw: "" })),
+          messages: [],
+          users: [],
+          supervisorName: "",
+          trend,
+          status: status.tier,
           error: "",
         });
     } else {
-      const [users, messages, alerts] = await Promise.all([
+      const [users] = await Promise.all([
         request<ApiPatient[]>("/api/supervisor/patients"),
-        request<ApiMessage[]>("/api/supervisor/messages"),
-        request<ApiAlert[]>("/api/supervisor/alerts"),
       ]);
       const summaries = Object.fromEntries(
         await Promise.all(
@@ -120,16 +130,14 @@ export const useApp = create<State>((set, get) => ({
       if (same())
         set({
           users: users.map(toUser),
-          messages: messages.map(toMessage),
+          messages: [],
           summaries,
-          alerts,
+          alerts: [],
           reflections: [],
           followed: users
             .filter(
               (p) =>
-                !alerts.some(
-                  (a) => a.patient_id === p.id && a.status === "open",
-                ),
+                true,
             )
             .map((p) => p.id),
           error: "",

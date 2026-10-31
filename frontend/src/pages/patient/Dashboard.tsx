@@ -10,6 +10,8 @@ import { dateLabel } from "../../utils/date";
 export function Dashboard() {
   const identity = useApp((s) => s.identity);
   const reports = useApp((s) => s.reports);
+  const trend = useApp((s) => s.trend);
+  const status = useApp((s) => s.status);
   const latest = reports[0];
   const earlier = reports.length > 1 ? reports[reports.length - 1] : null;
   return (
@@ -41,7 +43,7 @@ export function Dashboard() {
             LATEST{latest ? " · " + dateLabel(latest.created_at) : ""}
           </div>
           <h2>
-            {latest ? stateLabel[latest.attention_state] : "No check-ins yet"}
+            {status === "not_assessed" ? "Not assessed" : latest ? stateLabel[latest.attention_state] : "No check-ins yet"}
           </h2>
           <p>
             {latest?.summary ??
@@ -55,7 +57,7 @@ export function Dashboard() {
           )}
         </Card>
       </div>
-      <ProgressChart reports={reports} />
+      <ProgressChart reports={reports} trend={trend} />
       <Card className="latest-update">
         <div>
           <div className="eyebrow">CHECK-IN HISTORY</div>

@@ -12,7 +12,7 @@ export async function request<T>(
   const response = await fetch(base + path, {
     ...options,
     headers: {
-      "Content-Type": "application/json",
+      ...(options.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...options.headers,
     },
@@ -40,6 +40,27 @@ export interface ApiSummary {
   trend: "IMPROVING" | "WORSENING" | "NO_CLEAR_CHANGE";
   themes: string[];
   processing_mode: "mock" | "integrated";
+}
+
+export interface ApiSession {
+  session_id: string;
+  start_time: string;
+  end_time: string | null;
+  turn_count: number;
+  mean_score: number | null;
+  max_score: number | null;
+  min_score: number | null;
+  volatility: number | null;
+  within_session_trend: number | null;
+  computed_at: string | null;
+}
+
+export interface ApiTrendPoint {
+  computed_at: string;
+  trend_label: "improving" | "stable" | "worsening" | "insufficient_data";
+  slope: number;
+  confidence: number;
+  window_sessions: number;
 }
 export interface ApiPatient {
   id: string;
