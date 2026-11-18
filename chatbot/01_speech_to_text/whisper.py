@@ -1,5 +1,6 @@
 from pathlib import Path
 from faster_whisper import WhisperModel
+import ctranslate2
 import time
 
 # ------------------------------------------------------------------
@@ -18,11 +19,17 @@ print("Loading Whisper model...")
 
 start = time.time()
 
-model = WhisperModel(
-    "medium",
-    device="cuda",
-    compute_type="float16"
-)
+device = "cuda" if ctranslate2.get_cuda_device_count() > 0 else "cpu"
+compute_type = "float16" if device == "cuda" else "int8"
+print(f"Using {device} with {compute_type} computation.")
+
+try:
+    model = WhisperModel("medium", device=device, compute_type=compute_type)
+except RuntimeError:
+    if device != "cuda":
+        raise
+    print("GPU model loading failed. Retrying on CPU with int8 computation.")
+    model = WhisperModel("medium", device="cpu", compute_type="int8")
 
 print(f"Model loaded in {time.time()-start:.2f} sec\n")
 
