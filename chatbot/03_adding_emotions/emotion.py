@@ -3,6 +3,7 @@ import os
 import sys
 import subprocess
 import tempfile
+from numbers import Real
 
 import numpy as np
 import librosa
@@ -53,6 +54,11 @@ def load_audio(path):
                 f"FFmpeg could not decode audio file: {path}\n"
                 f"{e.stderr}"
             ) from e
+        except FileNotFoundError as e:
+            raise RuntimeError(
+                "FFmpeg is required to decode audio. On EndeavourOS/Arch, "
+                "install it with: sudo pacman -S ffmpeg"
+            ) from e
 
         y, sr = librosa.load(
             tmp.name,
@@ -70,10 +76,32 @@ def load_model():
     return feature_extractor, model
 
 
+def validate_timestamps(start, end, duration, sr):
+    """Reject invalid boundaries; allow stage 01's two-decimal rounding."""
+    for name, value in (("start", start), ("end", end)):
+        if isinstance(value, bool) or not isinstance(value, Real) or not np.isfinite(value):
+            raise ValueError(f"{name} must be a finite number of seconds, got {value!r}")
+    if start < 0 or end <= start:
+        raise ValueError(f"Expected 0 <= start < end, got start={start}, end={end}")
+    if start >= duration or end > duration + 0.005 + 1 / sr:
+        raise ValueError(
+            f"Segment {start}-{end}s exceeds audio duration {duration:.6f}s; "
+            "check that the transcript and recording belong together"
+        )
+    end = min(end, duration)
+    if int(end * sr) <= int(start * sr):
+        raise ValueError(f"Segment {start}-{end}s contains no audio samples")
+    return float(start), float(end)
+
+
 def emotion_audio_status(audio_chunk, sr):
     """Check the waveform itself, including when demo inputs lack stage 02 flags."""
+    if sr != TARGET_SR:
+        raise ValueError(f"Emotion inference requires {TARGET_SR} Hz audio, got {sr}")
     if len(audio_chunk) == 0:
         return "too_short"
+    if not np.all(np.isfinite(audio_chunk)):
+        raise ValueError("Audio contains non-finite samples")
     rms = float(np.sqrt(np.mean(np.square(audio_chunk))))
     if rms <= SILENCE_RMS_THRESHOLD:
         return "silent"
@@ -112,25 +140,28 @@ def main(audio_path, transcript_path):
     print("Loading audio...")
     y, sr = load_audio(audio_path)
 
-    with open(transcript_path, "r") as f:
+    with open(transcript_path, "r", encoding="utf-8") as f:
         segments = json.load(f)
 
     if not isinstance(segments, list):
         raise ValueError("Transcript must be a JSON list of segments")
 
     # Read all segment inputs and check audio usability before loading a model.
-    # Timestamp boundary validation is left to stage 02.
     segment_audio = []
     for i, seg in enumerate(segments):
         try:
             if not isinstance(seg, dict):
                 raise ValueError("Segment must be an object")
+            seg["start"], seg["end"] = validate_timestamps(
+                seg["start"], seg["end"], len(y) / sr, sr
+            )
             start_sample = int(seg["start"] * sr)
             end_sample = int(seg["end"] * sr)
+            chunk = y[start_sample:end_sample]
+            status = emotion_audio_status(chunk, sr)
         except (KeyError, TypeError, ValueError, OverflowError) as e:
             raise ValueError(f"Cannot read segment {i + 1}: {e}") from e
-        chunk = y[start_sample:end_sample]
-        segment_audio.append((chunk, emotion_audio_status(chunk, sr)))
+        segment_audio.append((chunk, status))
 
     feature_extractor, model = None, None
 
@@ -163,7 +194,7 @@ def main(audio_path, transcript_path):
         exist_ok=True,
     )
 
-    with open(OUTPUT_PATH, "w") as f:
+    with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
         json.dump(
             segments,
             f,
@@ -178,6 +209,12 @@ def main(audio_path, transcript_path):
 
 
 if __name__ == "__main__":
+
+    if len(sys.argv) > 3:
+        raise SystemExit(
+            "Usage: python emotion.py [audio_path] [transcript_path]\n"
+            f"Output is fixed at: {OUTPUT_PATH}"
+        )
 
     audio_path = (
         sys.argv[1]
