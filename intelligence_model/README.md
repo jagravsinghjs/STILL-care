@@ -43,7 +43,7 @@ LLM) are a separate team's code, reached only through `pipeline/ingest.py`.
 Modules 6-9                              (someone else's code)
      |
      v
-pipeline/ingest.py            ingest_turn() -- per turn, insert only
+pipeline/ingest.py            ingest_turn() -- save turn + early review check
      |                        end_session_and_run() -- triggers everything below
      v
 Module 11  session_analysis        raw turns -> SessionSummary (+ PDF report)
@@ -106,13 +106,14 @@ new trained model, a bug fix) without re-running the others.
   at a time; de-escalation from YELLOW is the same flat rule; de-escalation
   from RED is weighted and needs a weighted total of 10. `acute_override`
   bypasses all of it — immediate RED, streak reset.
-- **Module 16 (`module6_alerting/`)** — compares `RiskStatus` before/after
-  Module 15's update and decides whether to write an `Alert`. Detect +
-  notify only — never takes action itself. Urgency is encoded as a text
-  prefix on `reason` (`[ESCALATION]` / `[ACUTE]` / `[PROGRESS]`), since
-  `Alert`'s schema has no priority column. After writing the row,
-  best-effort pushes it to **alertd** over a Unix socket so a connected
-  dashboard gets it instantly instead of on its next poll.
+- **Module 16 (`module6_alerting/`)** — checks stored turns immediately for
+  high numerical distress and explicit harm/coercion/severe-distress language.
+  A first or second session can create a supervisor review alert without a
+  tier change. End-of-session moderate/high risk can also request review.
+  Alerts expose `priority` separately from the long-term tier, are stored
+  in SQLite, and are best-effort pushed to the optional **alertd** relay.
+  No intervention is performed automatically. See the module README for
+  prototype thresholds, deduplication, and local queue commands.
 - **Module 17 (`module7_intervention/`)** — proposes, never applies,
   intervention categories from `RiskStatus` + `acute_override`. Currently
   `COUNSELLING` (tier ≥ YELLOW), `MEDICAL` (acute), `PROTECTION_RELOCATION`

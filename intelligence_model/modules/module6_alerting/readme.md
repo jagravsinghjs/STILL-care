@@ -1,34 +1,67 @@
-# Module 16 — Alert & Escalation
+# Module 16 — Early supervisor review and tier alerts
 
-Watches a patient's `RiskStatus` before/after Module 15's update, plus
-the triggering `EscalationRisk.acute_override` flag, and decides whether
-to write an `Alert`. **Strictly detect + notify — this module never takes
-action on its own.** It writes a row a human can see and act on; it does
-not contact anyone, lock any account, or trigger any intervention itself.
-That's the whole point: alerts go to supervisors, not to automation.
+A concerning first or second session can request supervisor attention.
+`ingest_turn()` checks the stored turns before returning to the chatbot, without
+waiting for session closure. `check_and_alert()` also evaluates session risk
+at the end. These are prototype review rules, not diagnoses or validated
+clinical thresholds. The longer-term tier's hysteresis is unchanged.
 
-`alert_engine.py` is the *only* module permitted to write to `alerts` —
-`db/repository.py` exposes the mechanics but enforces nothing; that
-boundary is a convention, not a technical guarantee, so don't add
-`insert_alert` calls anywhere else.
+## Review triggers
 
-## Priority via reason prefix, not a schema field
+- A numerical turn score above 65/100 requests urgent review, even if historical
+  confidence is low and the combined session risk stays LOW.
+- Explicit severe distress/difficulty coping, physical harm, threats, or personal
+  harm/forcing language requests urgent review; following/bullying/coercion
+  patterns can request prompt review. Exact patterns live in `alert_engine.py`.
+- A MODERATE session risk requests prompt review; HIGH requests urgent review.
+- Existing acute phrases still request urgent attention and force RED during
+  the completed risk pipeline. Escalation/progress alerts remain supported.
 
-`Alert`'s schema (immutable, per `schemas.py`) has no priority/category
-column. This module encodes urgency as a text prefix on `reason` instead:
-`[ESCALATION]` (tier got worse), `[ACUTE]` (acute-risk language matched,
-always alerts even with no tier change), `[PROGRESS]` (tier improved —
-lower urgency, encouraging tone). Anything consuming `alerts`
-(`api/routes_alerts.py`, the dashboard) that wants to sort or style by
-urgency needs to parse this prefix. If a schema migration is ever
-acceptable, a real `category` column would replace this cleanly.
+Calm turns do not automatically create an alert. Simple direct negations are
+filtered for the new review patterns; contextual negation, quotations, historical
+statements, and recognition errors remain limitations. The existing acute phrase
+matcher retains its original behavior. Human review is required; the rules
+must not be described as comprehensive safety detection.
 
-## `notifier.py` — will silently no-op until alertd exists
+## Storage, priority, and delivery
 
-`alertd` isn't built yet (see the top-level handoff doc). `notifier.py`
-attempts a best-effort push over a Unix socket after every alert insert,
-but every attempt will fail (connection refused / socket missing) until
-alertd is actually running — and that's expected, not a bug. Failures are
-logged at debug level and swallowed; they never affect whether the
-`Alert` row itself gets written, since that's the actual safety-relevant
-action.
+`Alert.tier` records monitoring status; computed `Alert.priority` is `urgent`,
+`prompt`, or `routine`, derived from the reason prefix and tier. The API and
+relay payload expose this field without a database migration. Consumers must
+use priority rather than treating a GREEN-tier review alert as an all-clear.
+
+One deterministic attention-alert ID is used per patient/session. Rechecking
+or finalizing does not duplicate it or repeatedly push it. Higher urgency or a
+new acute flag reopens/upgrades it; otherwise acknowledgment is preserved.
+Different sessions may create distinct review alerts. Progress events remain
+separate. There is no new automatic treatment or group broadcast.
+
+Alerts are stored in `alerts` and surfaced through the existing authenticated
+`GET /alerts` / acknowledgment API. The optional `alertd` relay receives a
+best-effort push on new/upgraded alerts. Missing relay/subscriber does not
+remove the DB record. A queue record is not confirmed human receipt. Frontend,
+login, consultant assignment, email/SMS delivery are outside this change.
+
+## Local prototype supervisor queue
+
+From the repository root, using the same database as the chatbot:
+
+```bash
+export STILL_DB_PATH="$PWD/data/still.db"
+uv run python intelligence_model/scripts/view_alerts.py --patient-id solo_demo_001
+```
+
+This is a trusted local operator command, not an authenticated supervisor login.
+To explicitly apply the new rules to an older saved session, add
+`--review-session <session_id>`. Reading the queue alone does not backfill old
+alerts. The recheck may create an alert and attempt the optional relay push.
+
+## Offline checks
+
+```bash
+uv run python -m unittest discover -s intelligence_model/tests -p 'test_early_alerts.py' -v
+uv run python -m unittest discover -s intelligence_model/tests -p 'test_chatbot_connection.py' -v
+```
+
+Tests use temporary databases and mock the relay; no actual consultant is
+contacted. API tests mock model generation but use real ingestion/scoring.

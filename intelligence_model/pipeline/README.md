@@ -7,10 +7,11 @@ functions deliberately.
 
 - `ingest_turn(turn, conn=None)` fires once per conversational turn.
   Modules 6-9's integration layer calls this after every turn completes.
-  It only ever writes — creates the `sessions` row on first sight of a
+  It creates the `sessions` row on first sight of a
   new `session_id` (there's no separate "start session" entry point
-  anywhere in this project), then inserts the turn. Nothing downstream
-  runs from this call.
+  anywhere in this project), then inserts the turn and checks for early
+  supervisor attention. It returns a new/upgraded review alert or None.
+  The full historical trend/risk pipeline still waits for session closure.
 - `end_session_and_run(session_id, end_time, turn_count, conn=None)`
   fires exactly once per session, called explicitly by whatever knows the
   session actually ended (a conversation UI closing, a timeout). `end_time`

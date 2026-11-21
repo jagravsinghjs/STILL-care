@@ -56,6 +56,11 @@ def _to_core_emotion(emotion: EmotionScores) -> "still_core.EmotionScores":
     )
 
 
+def score_turn(turn):
+    """Pure numeric scoring, shared with early supervisor-review checks."""
+    return _scorer.score(_to_core_arousal(turn.arousal), _to_core_emotion(turn.emotion))
+
+
 def analyze_session(session_id: str, conn=None) -> Optional[SessionSummary]:
     """
     Scores every turn in `session_id`, computes session-level stats, and
@@ -79,7 +84,7 @@ def analyze_session(session_id: str, conn=None) -> Optional[SessionSummary]:
         return None  # nothing to score or summarize
 
     for turn in turns:
-        result = _scorer.score(_to_core_arousal(turn.arousal), _to_core_emotion(turn.emotion))
+        result = score_turn(turn)
         update_turn_score(turn.turn_id, result.score, result.flagged_high_pause, conn=conn)
 
     # Rebuild the timeline from what was just persisted (rather than from

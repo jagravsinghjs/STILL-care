@@ -143,6 +143,31 @@ It does not return the raw transcript or patient closing message. The API
 still expects the enclosing backend to authenticate supervisor identities;
 no login or frontend integration is added by these changes.
 
+## Early supervisor attention (solo or grouped)
+
+Each stored turn is checked immediately for a high numeric score or explicit
+language about severe distress, harm, threats, bullying, coercion, or following.
+The chatbot prints `[supervisor review: urgent] Alert queued: ...` (or `prompt`)
+when a new alert is created/upgraded. No three-session wait or group membership
+is required. Finalization also checks the completed session's risk.
+
+The longer-term GREEN/YELLOW/RED tier still uses its existing smoothing rules;
+alert `priority` is separate, so GREEN does not hide an urgent review request.
+Checks use prototype thresholds/phrase patterns, not a validated clinical
+classifier. They cannot detect every concerning statement, and simple negation
+handling is not full understanding of context or quoted speech.
+
+View the local supervisor queue, using the same `STILL_DB_PATH`:
+
+```bash
+uv run python intelligence_model/scripts/view_alerts.py --patient-id solo_demo_001
+```
+
+An alert record is not proof a consultant has read it. The authenticated API
+exposes `/alerts`; live relay delivery requires `alertd` and a subscriber.
+Frontend notifications, consultant assignment/authentication, email and SMS
+are not implemented by this change.
+
 ## Optional three-friend case circle
 
 Create a group and accept invitations through

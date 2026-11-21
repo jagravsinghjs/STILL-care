@@ -80,7 +80,7 @@ from transformers import pipeline
 # These are the only two functions this script needs from that repo.
 from pipeline.ingest import ingest_turn, end_session_and_run, save_conversation_report
 from db.connection import init_schema
-from schemas.schemas import ArousalFeatures, ArousalLabel, EmotionScores, TurnRecord
+from schemas.schemas import Alert, ArousalFeatures, ArousalLabel, EmotionScores, TurnRecord
 
 # [INTEGRATION] shared patient_id -> case_facts_path registry (fixes the
 # "human has to remember which case_facts_*.json belongs to which patient"
@@ -552,7 +552,9 @@ def push_turn_to_intelligence_model(session_id, patient_id, turn_text, acoustic,
                 source="text",
             ),
         )
-        ingest_turn(turn_record)
+        review_alert = ingest_turn(turn_record)
+        if isinstance(review_alert, Alert):
+            print(f"[supervisor review: {review_alert.priority}] Alert queued: {review_alert.reason}")
         return True
     except Exception as e:
         print(f"[warn] Turn was not saved to intelligence_model: {e}")

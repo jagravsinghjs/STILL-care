@@ -27,7 +27,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 
 # ---------------------------------------------------------------------------
@@ -210,6 +210,18 @@ class Alert(BaseModel):
     status: AlertStatus = AlertStatus.UNACKNOWLEDGED
     acknowledged_by: Optional[str] = None
     acknowledged_at: Optional[datetime] = None
+
+    @computed_field
+    @property
+    def priority(self) -> str:
+        """Review urgency is separate from the patient's persistent risk tier."""
+        if self.reason.startswith("[ACUTE]") or self.reason.startswith("[REVIEW] [URGENT]"):
+            return "urgent"
+        if self.reason.startswith("[ESCALATION]"):
+            return "urgent" if self.tier == RiskTier.RED else "prompt"
+        if self.reason.startswith("[REVIEW]"):
+            return "prompt"
+        return "routine"
 
 
 # ---------------------------------------------------------------------------

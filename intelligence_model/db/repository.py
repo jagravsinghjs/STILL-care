@@ -570,6 +570,34 @@ def _row_to_alert(row: sqlite3.Row) -> Alert:
     )
 
 
+def upsert_session_review_alert(alert: Alert, conn: ConnOrNone = None) -> tuple[Alert, bool]:
+    """One stable alert ID per session; notify again only if urgency increases."""
+    ranks = {"routine": 0, "prompt": 1, "urgent": 2}
+    def _do(c):
+        row = c.execute("SELECT * FROM alerts WHERE alert_id=?", (alert.alert_id,)).fetchone()
+        if row is None:
+            insert_alert(alert, conn=c)
+            return alert, True
+        previous = _row_to_alert(row)
+        upgrade = (ranks[alert.priority] > ranks[previous.priority] or
+                   (alert.reason.startswith("[ACUTE]") and not previous.reason.startswith("[ACUTE]")))
+        if ranks[previous.priority] > ranks[alert.priority] or (
+            previous.reason.startswith("[ACUTE]") and not alert.reason.startswith("[ACUTE]")
+        ):
+            return previous, False
+        status = AlertStatus.UNACKNOWLEDGED if upgrade else previous.status
+        c.execute("""UPDATE alerts SET tier=?,reason=?,status=?,acknowledged_by=?,acknowledged_at=?,triggered_at=?
+                     WHERE alert_id=?""", (
+            alert.tier.value, alert.reason, status.value,
+            None if upgrade else previous.acknowledged_by,
+            None if upgrade or previous.acknowledged_at is None else previous.acknowledged_at.isoformat(),
+            alert.triggered_at.isoformat() if upgrade else previous.triggered_at.isoformat(),
+            alert.alert_id,
+        ))
+        return _row_to_alert(c.execute("SELECT * FROM alerts WHERE alert_id=?", (alert.alert_id,)).fetchone()), upgrade
+    return _run(conn, _do)
+
+
 def get_unacknowledged_alerts(patient_id: Optional[str] = None, conn: ConnOrNone = None) -> list[Alert]:
     def _do(c: sqlite3.Connection) -> list[Alert]:
         if patient_id is not None:
@@ -583,7 +611,9 @@ def get_unacknowledged_alerts(patient_id: Optional[str] = None, conn: ConnOrNone
                 "SELECT * FROM alerts WHERE status = ? ORDER BY triggered_at DESC",
                 (AlertStatus.UNACKNOWLEDGED.value,),
             )
-        return [_row_to_alert(row) for row in cur.fetchall()]
+        alerts = [_row_to_alert(row) for row in cur.fetchall()]
+        rank = {"routine": 0, "prompt": 1, "urgent": 2}
+        return sorted(alerts, key=lambda alert: rank[alert.priority], reverse=True)
     return _run(conn, _do)
 
 
