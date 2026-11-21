@@ -180,8 +180,12 @@ def _segment_to_turn_record(
         zero_crossing_rate=acoustic["zero_crossing_rate"],
         pause_ratio=acoustic["pause_ratio"],
         arousal_label=_map_arousal_label(segment["arousal_label"]),
+        pitch_available=acoustic.get("pitch_available"),
+        audio_status=acoustic.get("audio_status"),
     )
     emotion = _map_emotion_probs(segment.get("speech_emotion", {}))
+    emotion.analysis_status = segment.get("speech_emotion_status")
+    emotion.source = "speech"
 
     return TurnRecord(
         turn_id=f"{session_id}::seg::{index:04d}",
