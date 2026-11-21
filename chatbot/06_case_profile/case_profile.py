@@ -125,6 +125,9 @@ def extract_narrative_facts(text: str, model: str = "qwen2.5:7b-instruct") -> di
 their case in their own words -- it may be informal, partial, or out of order.
 Respond with JSON only -- no other text, no markdown fences. Use null or [] for
 anything not mentioned. Do not invent details.
+Keep the patient's own experiences distinct from things reported about friends
+or received in a case-circle notice. Never attribute another person's incident
+to this patient. This profile belongs to this patient within one case.
 
 {{
   "fir_number": "<FIR number if stated, else null>",
