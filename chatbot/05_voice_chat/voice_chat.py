@@ -78,7 +78,8 @@ from transformers import pipeline
 
 # [INTEGRATION] intelligence_model's public contract -- see INTEGRATION.md.
 # These are the only two functions this script needs from that repo.
-from pipeline.ingest import ingest_turn, end_session_and_run
+from pipeline.ingest import ingest_turn, end_session_and_run, save_conversation_report
+from db.connection import init_schema
 from schemas.schemas import ArousalFeatures, ArousalLabel, EmotionScores, TurnRecord
 
 # [INTEGRATION] shared patient_id -> case_facts_path registry (fixes the
@@ -536,6 +537,8 @@ def push_turn_to_intelligence_model(session_id, patient_id, turn_text, acoustic,
                 zero_crossing_rate=acoustic.get("zero_crossing_rate", 0.0),
                 pause_ratio=acoustic.get("pause_ratio", 0.0),
                 arousal_label=arousal_label,
+                pitch_available=acoustic.get("pitch_available"),
+                audio_status=acoustic.get("audio_status"),
             ),
             emotion=EmotionScores(
                 anger=text_emotion.get("anger", 0.0),
@@ -545,6 +548,8 @@ def push_turn_to_intelligence_model(session_id, patient_id, turn_text, acoustic,
                 neutral=text_emotion.get("neutral", 0.0),
                 sadness=text_emotion.get("sadness", 0.0),
                 surprise=text_emotion.get("surprise", 0.0),
+                analysis_status=text_emotion_status(text_emotion),
+                source="text",
             ),
         )
         ingest_turn(turn_record)
@@ -867,6 +872,7 @@ def generate_report(turns, output_dir):
     print(f"Graph written to {graph_path}")
     print("\nClinician summary:\n", result["clinician_summary"])
     print("\nClosing message:\n", result["patient_message"])
+    return result
 
 
 def make_session_graph(result, graph_path):
@@ -952,11 +958,19 @@ def finalize_session(turns, session_id, patient_id, case_facts_path, case_facts,
 
     try:
         os.makedirs(output_dir, exist_ok=True)
-        generate_report(turns, output_dir)
+        report = generate_report(turns, output_dir)
         outcomes["report"] = "saved"
     except Exception as e:
         outcomes["report"] = "failed"
         print(f"[warn] Local report failed; see the turn checkpoint for session data: {e}")
+    outcomes["report_database"] = "skipped"
+    if outcomes["report"] == "saved" and ingested_count:
+        try:
+            save_conversation_report(session_id, report, MODEL)
+            outcomes["report_database"] = "saved"
+        except Exception as e:
+            outcomes["report_database"] = "failed"
+            print(f"[warn] Report is saved locally but could not be stored for the intelligence API: {e}")
     print(f"\nSession results: {outcomes}")
     return outcomes
 
@@ -973,6 +987,8 @@ if __name__ == "__main__":
              "case profile was registered via case_profile.py --patient-id, if any.",
     )
     args = parser.parse_args()
+    # Idempotent: create new shared integration tables without replacing data.
+    init_schema()
 
     # [INTEGRATION] Look up this patient's case_facts path automatically
     # instead of requiring a --case-facts flag typed in by hand. Returns
