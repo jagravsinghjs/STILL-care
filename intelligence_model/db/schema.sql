@@ -86,3 +86,53 @@ CREATE TABLE IF NOT EXISTS intervention_recommendation (
     accepted           INTEGER          -- NULL = pending, 0 = dismissed, 1 = accepted
 );
 CREATE INDEX IF NOT EXISTS idx_intervention_patient ON intervention_recommendation(patient_id);
+
+-- Shared case circles: used by chatbot 07 and the intelligence supervisor API.
+
+CREATE TABLE IF NOT EXISTS chatbot_case_groups (
+    group_id TEXT PRIMARY KEY, case_id TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL, supervisor_id TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS chatbot_group_members (
+    group_id TEXT NOT NULL REFERENCES chatbot_case_groups(group_id),
+    patient_id TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('invited','accepted','declined','left')),
+    share_safety INTEGER NOT NULL DEFAULT 0,
+    invited_at TEXT NOT NULL, responded_at TEXT,
+    PRIMARY KEY(group_id, patient_id)
+);
+CREATE TABLE IF NOT EXISTS chatbot_patient_cases (
+    patient_id TEXT PRIMARY KEY, case_id TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS chatbot_one_active_case_per_patient
+    ON chatbot_group_members(patient_id) WHERE status = 'accepted';
+CREATE TABLE IF NOT EXISTS chatbot_safety_incidents (
+    incident_id TEXT PRIMARY KEY,
+    group_id TEXT NOT NULL REFERENCES chatbot_case_groups(group_id),
+    patient_id TEXT NOT NULL, session_id TEXT NOT NULL, turn_id TEXT NOT NULL,
+    kind TEXT NOT NULL, summary TEXT NOT NULL, evidence_quote TEXT NOT NULL,
+    fingerprint TEXT NOT NULL, created_at TEXT NOT NULL,
+    UNIQUE(group_id, patient_id, turn_id, kind),
+    UNIQUE(group_id, patient_id, fingerprint)
+);
+CREATE TABLE IF NOT EXISTS chatbot_group_alerts (
+    alert_id TEXT PRIMARY KEY,
+    incident_id TEXT NOT NULL UNIQUE REFERENCES chatbot_safety_incidents(incident_id),
+    group_id TEXT NOT NULL REFERENCES chatbot_case_groups(group_id),
+    message TEXT NOT NULL, independent_reporters INTEGER NOT NULL, created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS chatbot_alert_deliveries (
+    alert_id TEXT NOT NULL REFERENCES chatbot_group_alerts(alert_id),
+    recipient_id TEXT NOT NULL,
+    role TEXT NOT NULL CHECK(role IN ('patient','supervisor')),
+    delivered_at TEXT, acknowledged_at TEXT,
+    PRIMARY KEY(alert_id, recipient_id, role)
+);
+
+CREATE TABLE IF NOT EXISTS chatbot_session_reports (
+    session_id TEXT PRIMARY KEY REFERENCES sessions(session_id),
+    patient_id TEXT NOT NULL,
+    model TEXT NOT NULL,
+    generated_at TEXT NOT NULL,
+    report_json TEXT NOT NULL
+);
