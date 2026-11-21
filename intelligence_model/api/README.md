@@ -1,5 +1,27 @@
 # api/ — FastAPI surface for Modules 11-17
 
+## Chatbot integration
+
+These endpoints use the existing supervisor identity dependency:
+
+| Method | Path | Result |
+|---|---|---|
+| GET | `/reports/{session_id}/combined` | Stored chatbot narrative, numerical monitoring, quality flags, and explicitly separate score scales |
+| GET | `/case-groups` | Circles owned by the authenticated supervisor |
+| GET | `/case-groups/alerts` | Their unacknowledged group notices; `?history=true` includes acknowledged history |
+| PATCH | `/case-groups/alerts/{alert_id}/acknowledge` | Acknowledges the same delivery visible in chatbot 07's CLI |
+
+Combined reports omit raw transcripts and the patient closing message.
+Missing narrative/monitoring results are null, so a failed stage does not hide
+other saved results. Current patient status/latest trend are labeled separately
+from the triggering session's analysis. Group routes enforce circle ownership;
+session-report routes retain the existing authentication contract and depend
+on the enclosing backend for patient/caseload authorization. There is no new
+identity header or login bypass. Frontend files have not been connected.
+
+Patient status trends now retain all four values: `improving`, `stable`,
+`worsening`, `insufficient_data`. Consumers must support these values.
+
 ## Route map
 
 | Method | Path | Backs |

@@ -5,7 +5,7 @@ A second, REDACTED read path alongside routes_dashboard.py /
 routes_reports.py -- those two return the full numeric contract
 (mean_score, risk_score, slope, volatility, ...) that Module 13/14 need
 internally. This file is what should actually reach the frontend: it
-returns exactly the shape src/types/index.ts already defines
+returns a redacted shape intended for the frontend
 (RiskLevel = 'green'|'yellow'|'red', a distress-trend label, a
 plain-language reason) and NO raw floats.
 
@@ -19,20 +19,9 @@ future internal tool may legitimately want the numeric detail. This is
 specifically the path the patient-privacy-conscious frontend should be
 pointed at instead.
 
-ONE THING THIS FILE ASSUMES YOU'LL DECIDE: src/types/index.ts currently
-defines `DistressTrend = 'improving' | 'worsening'` (2 values) for BOTH
-a single check-in's within-session trend (genuinely 2-valued -- a
-session either trended up or it didn't) AND a patient's cross-session
-trend (schemas.TrendLabel has 4 values: improving/stable/worsening/
-insufficient_data). Collapsing those extra two into the existing 2
-means either lying that a brand-new patient with one session is
-"improving" (false reassurance) or "worsening" (needless alarm) when
-really there's just no trend yet. My recommendation: extend the
-frontend type instead of collapsing here -- see the chat message this
-came with for the exact 1-line diff. PATIENT_TREND_LABEL_MAP below
-implements the collapse as a fallback ONLY, in case you decide you'd
-rather not touch the frontend type; swap callers to
-_trend_label_passthrough if/when you do extend it.
+Patient-level trends retain all four values (improving, stable, worsening,
+insufficient_data). Consumers must support these values rather than treating
+missing evidence as deterioration. No frontend files are changed by this API.
 """
 
 from __future__ import annotations
@@ -58,13 +47,13 @@ router = APIRouter(prefix="/supervisor-view", tags=["supervisor-view"])
 
 
 # ---------------------------------------------------------------------------
-# response shapes -- deliberately mirror src/types/index.ts field-for-field
+# Response shapes; frontend consumers must support all patient trend values.
 # ---------------------------------------------------------------------------
 
 class PatientStatusView(BaseModel):
     """Shape for Patient.currentRiskLevel / Patient.distressTrend."""
     risk_level: str          # 'green' | 'yellow' | 'red' -- RiskTier.value, no translation needed
-    distress_trend: str      # see PATIENT_TREND_LABEL_MAP below
+    distress_trend: str      # all four TrendLabel values
     plain_language_reason: Optional[str] = None
 
 
@@ -80,29 +69,8 @@ class SessionView(BaseModel):
 # trend-label translation
 # ---------------------------------------------------------------------------
 
-# Fallback ONLY -- see module docstring. Prefer extending the frontend
-# type over using this.
-PATIENT_TREND_LABEL_MAP: dict[TrendLabel, str] = {
-    TrendLabel.IMPROVING: "improving",
-    TrendLabel.STABLE: "worsening",         # <- deliberately conservative,
-    TrendLabel.WORSENING: "worsening",      #    not deliberately correct;
-    TrendLabel.INSUFFICIENT_DATA: "worsening",  # see docstring, fix this
-}
-# The three-way collapse above biases toward over-flagging rather than
-# under-flagging when forced into a 2-valued type, on the theory that a
-# false "keep watching this" costs less than a false "all clear" in this
-# domain. That is a real, debatable safety/UX tradeoff dressed up as a
-# one-line dict -- it should not quietly ship this way. Extend the
-# frontend type instead and swap to _trend_label_passthrough.
-
-
-def _trend_label_passthrough(label: TrendLabel) -> str:
-    """Use this once src/types/index.ts's DistressTrend includes all 4 values."""
-    return label.value
-
-
 def _patient_trend_label(label: TrendLabel) -> str:
-    return PATIENT_TREND_LABEL_MAP[label]
+    return label.value
 
 
 def _session_trend_label(within_session_trend: float) -> str:
@@ -151,10 +119,8 @@ def get_patient_status_view(patient_id: str, conn=Depends(get_db), _=Depends(get
         raise HTTPException(status_code=404, detail=f"No risk status yet for patient {patient_id!r}")
 
     trend = get_latest_distress_trend(patient_id, conn=conn)
-    distress_trend = _patient_trend_label(trend.trend_label) if trend is not None else "worsening"
-    # ^ same conservative-default reasoning as PATIENT_TREND_LABEL_MAP's
-    # INSUFFICIENT_DATA case -- no trend row yet at all is the same
-    # "don't know" situation, handled the same way for the same reason.
+    distress_trend = _patient_trend_label(trend.trend_label) if trend is not None else "insufficient_data"
+
 
     latest_risk = get_latest_escalation_risk(patient_id, conn=conn)
     reason = None
