@@ -84,6 +84,8 @@ class ArousalFeatures(BaseModel):
     zero_crossing_rate: float
     pause_ratio: float
     arousal_label: ArousalLabel
+    pitch_available: Optional[bool] = None
+    audio_status: Optional[str] = None
 
 
 class EmotionScores(BaseModel):
@@ -94,6 +96,8 @@ class EmotionScores(BaseModel):
     neutral: float = Field(ge=0, le=1)
     sadness: float = Field(ge=0, le=1)
     surprise: float = Field(ge=0, le=1)
+    analysis_status: Optional[str] = None
+    source: Optional[str] = None
 
 
 class TurnRecord(BaseModel):
