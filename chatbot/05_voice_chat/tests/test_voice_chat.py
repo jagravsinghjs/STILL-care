@@ -26,6 +26,7 @@ def load_voice_module():
     ingest_module = ModuleType("pipeline.ingest")
     ingest_module.ingest_turn = Mock()
     ingest_module.end_session_and_run = Mock()
+    ingest_module.save_conversation_report = Mock()
     case_module = ModuleType("case_profile")
     case_module.extract_and_merge_case_facts = Mock()
     registry_module = ModuleType("patient_registry")

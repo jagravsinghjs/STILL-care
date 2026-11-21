@@ -129,6 +129,20 @@ The local report is separate from the intelligence layer's cross-session
 trends/risk/alerts. Full report validation, long-conversation handling, shared
 registry consolidation, and multilingual support remain deferred.
 
+Successful local narrative reports are also stored in the shared SQLite DB
+when at least one turn was ingested. Finalization reports this separately as
+`report_database`; failure leaves the local files intact. Stage 05 initializes
+the shared schema at startup, preserving existing data. Quality flags and
+text-emotion source/status now survive ingestion in the existing JSON columns.
+They are exposed for inspection; the numeric core's weights are unchanged.
+
+The intelligence API's `GET /reports/{session_id}/combined` returns the
+clinician narrative, 0–10 LLM timeline, separate 0–100 monitoring analysis,
+session risk/explanation, current patient status/trend, and analysis quality.
+It does not return the raw transcript or patient closing message. The API
+still expects the enclosing backend to authenticate supervisor identities;
+no login or frontend integration is added by these changes.
+
 ## Optional three-friend case circle
 
 Create a group and accept invitations through
