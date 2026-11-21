@@ -18,11 +18,48 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import FileResponse
 
 from db.repository import get_session, get_session_summary_row, get_turn_scores_for_session
+from db.repository import (
+    get_chatbot_report, get_turns_for_session, get_escalation_risk, get_risk_explanation,
+    get_risk_status, get_latest_distress_trend,
+)
 from modules.module1_session_analysis import generate_report
 from schemas.schemas import SessionSummary
 from .deps import get_current_supervisor, get_db
 
 router = APIRouter(prefix="/reports", tags=["reports"])
+
+
+@router.get("/{session_id}/combined")
+def get_combined_report(session_id: str, conn=Depends(get_db), _=Depends(get_current_supervisor)):
+    session = get_session(session_id, conn=conn)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    patient_id = session["patient_id"]
+    conversation = get_chatbot_report(session_id, conn=conn)
+    if conversation is not None:
+        report = conversation.pop("report")
+        conversation.update({
+            "score_scale": {"min": 0, "max": 10, "method": "LLM estimate"},
+            "clinician_summary": report.get("clinician_summary"),
+            "turns": report.get("turns", report.get("segments", [])),
+        })
+        # Patient closing message and raw transcript are not part of this view.
+    return {
+        "session_id": session_id, "patient_id": patient_id,
+        "conversation_report": conversation,
+        "monitoring_score_scale": {"min": 0, "max": 100, "method": "heuristic numeric core"},
+        "session_summary": _load_session_summary(session_id, conn),
+        "session_risk": get_escalation_risk(patient_id, session_id, conn=conn),
+        "session_explanation": get_risk_explanation(patient_id, session_id, conn=conn),
+        "current_patient_status": get_risk_status(patient_id, conn=conn),
+        "latest_patient_trend": get_latest_distress_trend(patient_id, conn=conn),
+        "analysis_quality": [{"turn_id": t.turn_id,
+                              "pitch_available": t.arousal.pitch_available,
+                              "audio_status": t.arousal.audio_status,
+                              "emotion_status": t.emotion.analysis_status,
+                              "emotion_source": t.emotion.source}
+                             for t in get_turns_for_session(session_id, conn=conn)],
+    }
 
 
 def _load_session_summary(session_id: str, conn) -> Optional[SessionSummary]:

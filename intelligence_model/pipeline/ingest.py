@@ -9,19 +9,17 @@ functions, deliberately kept separate (see this package's README):
   session has closed. Marks the session ended and triggers the full
   Module 11-17 chain via orchestrator.run_pipeline().
 
-Neither function commits the connection itself -- consistent with every
-other module in this project (db/repository.py's functions never
-auto-commit; the caller does). Production callers (api/, or whatever
-wraps this) are expected to commit after a successful call, same as every
-test fixture in this codebase already does.
+With conn=None, repository operations open, commit and close their own
+connections. When a connection is supplied, the caller owns its transaction.
+save_conversation_report() stores an existing LLM report without rescoring it.
 """
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
-from db.repository import create_session, end_session, get_session, insert_turn
+from db.repository import create_session, end_session, get_session, insert_turn, upsert_chatbot_report
 from schemas.schemas import TurnRecord
 from .orchestrator import PipelineResult, run_pipeline
 
@@ -36,7 +34,14 @@ def ingest_turn(turn: TurnRecord, conn=None) -> None:
     existing = get_session(turn.session_id, conn=conn)
     if existing is None:
         create_session(turn.session_id, turn.patient_id, turn.timestamp, conn=conn)
+    elif existing["patient_id"] != turn.patient_id:
+        raise ValueError("Session belongs to a different patient")
     insert_turn(turn, conn=conn)
+
+
+def save_conversation_report(session_id: str, report: dict, model: str, conn=None) -> None:
+    """Public chatbot-to-intelligence entry point for an already-generated report."""
+    upsert_chatbot_report(session_id, report, model, datetime.now(timezone.utc), conn=conn)
 
 
 def end_session_and_run(
