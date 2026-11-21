@@ -266,10 +266,8 @@ def test_supervisor_status_after_single_acute_session(client, conn):
     Verified against a real run first: one acute-language turn gives
     risk_level=red, and get_latest_distress_trend returns
     TrendLabel.INSUFFICIENT_DATA (only 1 session_summary row exists --
-    trend_engine.py needs >=2). INSUFFICIENT_DATA is exactly the case
-    PATIENT_TREND_LABEL_MAP's fallback collapse handles -- this test is
-    documenting that collapse's current (deliberately conservative,
-    explicitly-flagged-as-questionable) behavior, not endorsing it.
+    trend_engine.py needs >=2). The API must preserve this label rather
+    than present missing history as a worsening trend.
     """
     _seed_acute_session(conn)
 
@@ -278,7 +276,7 @@ def test_supervisor_status_after_single_acute_session(client, conn):
     body = resp.json()
 
     assert body["risk_level"] == "red"
-    assert body["distress_trend"] == "worsening"  # collapsed from insufficient_data
+    assert body["distress_trend"] == "insufficient_data"
     assert body["plain_language_reason"] is not None
     assert "acute" in body["plain_language_reason"].lower()
     assert "immediate high-risk flag" in body["plain_language_reason"].lower()
@@ -292,9 +290,8 @@ def test_supervisor_status_trend_passthrough_when_genuinely_worsening(client, co
     (RiskLevel.LOW candidate_tier) while distress_trend=worsening --
     tier and trend are independent axes on purpose (hysteresis smooths
     the tier; the trend label doesn't get smoothed the same way), and
-    this is the genuine WORSENING case, not the collapsed
-    insufficient_data one above -- both read "worsening" in the API but
-    for different, worth-distinguishing reasons.
+    this is the genuine WORSENING case, distinct from the
+    insufficient_data label returned for a first session.
     """
     _seed_calm_session(conn, "s0", day_offset=0, pause_ratio=0.1)
     _seed_calm_session(conn, "s1", day_offset=1, pause_ratio=0.9)

@@ -1,5 +1,45 @@
 # Integrating with Still (SIH26094 — Modules 11-17)
 
+## Current chatbot connection
+
+From the repository root, configure one absolute DB path for all processes:
+
+```bash
+export STILL_DB_PATH="$PWD/data/still.db"
+uv run python -c 'from db.connection import init_schema; init_schema()'
+uv run python chatbot/05_voice_chat/voice_chat.py --patient-id friend1
+```
+
+The intelligence layer must already be installed (`uv pip install -e ./intelligence_model`).
+Stage 05 also initializes the shared schema at startup, preserving existing rows.
+The live path calls `ingest_turn` per turn, `end_session_and_run` at session end,
+and `save_conversation_report` after successfully generating its local report.
+The latter stores the LLM narrative alongside numerical analysis, without using
+its 0–10 estimates as inputs to the C++ 0–100 scoring/risk pipeline.
+
+Audio-quality flags and emotion source/status are retained in the existing
+JSON feature columns. Old payloads without these optional fields still load.
+The numerical core currently retains its original scoring weights and does not
+reweight uncertain/missing evidence automatically.
+
+Chatbot 07 initializes the same `db/schema.sql`; its case groups, confirmed
+incidents, and delivery/acknowledgment records can be read through the
+supervisor-owned `/case-groups` API. Individual mental-distress alerts and
+group safety notices remain distinct; group incidents do not force a mental
+risk tier and are not pushed through `alertd` by this integration.
+
+`GET /reports/{session_id}/combined` provides both report types with separate
+scales and quality metadata. Historical local JSON reports are not backfilled;
+the DB narrative is saved for new successful sessions. APIs still need their
+existing authenticated supervisor dependency supplied by the enclosing backend.
+The React mock APIs are unchanged.
+
+Offline connection checks (disposable DB, actual numeric pipeline, mocked LLM):
+
+```bash
+uv run python -m unittest discover -s intelligence_model/tests -p 'test_chatbot_connection.py' -v
+```
+
 This document is for whoever is building Modules 6-9's integration layer,
 or whoever owns the main Setu backend. It's written to be a complete,
 standalone reference — you shouldn't need to read this codebase's other

@@ -12,6 +12,22 @@ here when you want to understand *why* that contract looks the way it
 does, or when you need to run this layer standalone (tests, a demo,
 local development).
 
+## Connected chatbot prototype
+
+`chatbot/05_voice_chat` stores turns, closes sessions through the seven-stage
+pipeline, and persists its generated narrative using `save_conversation_report`.
+Both folders initialize `db/schema.sql` against the same `STILL_DB_PATH`.
+Optional audio/emotion quality metadata is preserved in the feature JSON.
+
+The supervisor API exposes `/reports/{session_id}/combined` with separate
+0–10 LLM and 0–100 numerical results, and `/case-groups` / `/case-groups/alerts`
+for chatbot 07's circle notices. Group acknowledgments update the same inbox
+seen by the CLI. Group safety reports remain separate from mental-risk tiers.
+
+Patient trend labels now retain all four values. Frontend mock APIs, login,
+and patient/caseload authorization still require the enclosing application.
+See `INTEGRATION.md` for setup and the offline connection test command.
+
 ## What this is
 
 Part of **STILL**, SIH26094 — AI-based dynamic mental health monitoring
@@ -138,7 +154,7 @@ made the "obvious" approach impossible without a migration:
 | `DistressTrend.slope` is negative when *worsening* | Matches `risk_aggregation.cpp`'s sign expectation — flip only with the C++ side too |
 | `RiskStatus.consecutive_high_assessments` is a **signed** streak counter (+escalating / −de-escalating), not a literal count of HIGH readings | Only persisted counter field the schema provides; a real migration would split this into two fields |
 | `ingest_turn()` / `end_session_and_run()` are two functions, not one with a flag | So historical sessions can be re-processed independently of new ingestion |
-| Every repository/module function takes `conn=` and never commits — except `api/deps.py::get_db()` | That's the one real top-level production entry point; every other "entry point" (scripts, tests) is expected to commit itself |
+| Repository calls accept `conn=` | With no connection they auto-commit through `get_conn()`; explicit connections are committed by their caller |
 
 ## Repo layout
 
@@ -217,19 +233,9 @@ one kind gets closed by writing code and the other doesn't.
 
 **Needs code, ready to be picked up any time:**
 
-- Nothing yet decides *when* a check-in is "done" and calls
-  `end_session_and_run` on the Modules 6-9 side — that trigger is still
-  open glue, likely in `05_voice_chat.py` or wherever the product
-  actually detects a check-in ending. See `INTEGRATION.md`.
-- `api/routes_supervisor_view.py` ships with a deliberately-lying
-  fallback (`PATIENT_TREND_LABEL_MAP`): the frontend's `DistressTrend`
-  type only has 2 values (`improving`/`worsening`), Module 12's
-  `TrendLabel` has 4, so `stable` and `insufficient_data` both currently
-  get collapsed into `"worsening"` rather than shown accurately. The
-  real fix is a one-line extension to `src/types/index.ts` (see that
-  route file's own docstring for the exact diff) — until that lands,
-  every brand-new or genuinely-stable patient shows as "worsening" on
-  the frontend, which is a real false signal, not a cosmetic one.
+- Connect the frontend's mock API functions to the real API and support all
+  four patient trend labels in its types/UI. Authentication and patient/
+  caseload authorization remain responsibilities of the enclosing backend.
 - `modules/README.md`, `modules/module6_alerting/readme.md`, and
   `db/README.md` are stale: the first two still say alertd/orchestrator
   "hasn't been built yet" (both now exist and are tested), and
