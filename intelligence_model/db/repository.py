@@ -20,6 +20,7 @@ via the optional `conn` parameter instead.
 from __future__ import annotations
 
 import sqlite3
+import json
 from datetime import datetime
 from typing import Optional
 
@@ -72,6 +73,75 @@ def _run(conn: ConnOrNone, fn):
         return fn(conn)
     with get_conn() as new_conn:
         return fn(new_conn)
+
+
+def upsert_chatbot_report(session_id: str, report: dict, model: str, generated_at: datetime,
+                          conn: ConnOrNone = None) -> None:
+    """Store the conversational report alongside, not in place of, numeric analysis."""
+    if not isinstance(report, dict):
+        raise ValueError("Chatbot report must be a JSON object")
+    encoded = json.dumps(report, ensure_ascii=False, allow_nan=False)
+    def _do(c):
+        session = c.execute("SELECT patient_id FROM sessions WHERE session_id=?", (session_id,)).fetchone()
+        if session is None:
+            raise ValueError("Cannot store a report for an unknown session")
+        c.execute("""INSERT INTO chatbot_session_reports VALUES (?,?,?,?,?)
+            ON CONFLICT(session_id) DO UPDATE SET model=excluded.model,
+            generated_at=excluded.generated_at,report_json=excluded.report_json""",
+                  (session_id, session["patient_id"], model, generated_at.isoformat(), encoded))
+    _run(conn, _do)
+
+
+def get_chatbot_report(session_id: str, conn: ConnOrNone = None):
+    def _do(c):
+        row = c.execute("SELECT * FROM chatbot_session_reports WHERE session_id=?", (session_id,)).fetchone()
+        if row is None:
+            return None
+        result = dict(row)
+        result["report"] = json.loads(result.pop("report_json"))
+        return result
+    return _run(conn, _do)
+
+
+def get_supervisor_case_groups(supervisor_id: str, conn: ConnOrNone = None):
+    def _do(c):
+        groups = c.execute("SELECT * FROM chatbot_case_groups WHERE supervisor_id=? ORDER BY created_at",
+                           (supervisor_id,)).fetchall()
+        result = []
+        for row in groups:
+            group = dict(row)
+            group["members"] = [dict(member) for member in c.execute(
+                "SELECT patient_id,status,share_safety FROM chatbot_group_members WHERE group_id=? ORDER BY patient_id",
+                (row["group_id"],)).fetchall()]
+            result.append(group)
+        return result
+    return _run(conn, _do)
+
+
+def get_supervisor_group_alerts(supervisor_id: str, pending_only=True, conn: ConnOrNone = None):
+    def _do(c):
+        pending = "AND d.acknowledged_at IS NULL" if pending_only else ""
+        rows = c.execute(f"""SELECT a.*,g.case_id,g.name AS case_name,i.patient_id AS source_patient_id,
+            i.session_id,i.turn_id,i.kind,i.summary,i.evidence_quote,d.delivered_at,d.acknowledged_at
+            FROM chatbot_alert_deliveries d JOIN chatbot_group_alerts a USING(alert_id)
+            JOIN chatbot_case_groups g USING(group_id) JOIN chatbot_safety_incidents i USING(incident_id)
+            WHERE d.recipient_id=? AND d.role='supervisor' AND g.supervisor_id=? {pending}
+            ORDER BY a.created_at,a.rowid""", (supervisor_id, supervisor_id)).fetchall()
+        return [dict(row) for row in rows]
+    return _run(conn, _do)
+
+
+def acknowledge_group_alert(alert_id: str, supervisor_id: str, now: datetime,
+                             conn: ConnOrNone = None) -> bool:
+    def _do(c):
+        result = c.execute("""UPDATE chatbot_alert_deliveries
+            SET delivered_at=COALESCE(delivered_at,?),acknowledged_at=COALESCE(acknowledged_at,?)
+            WHERE alert_id=? AND recipient_id=? AND role='supervisor'
+            AND EXISTS(SELECT 1 FROM chatbot_group_alerts a JOIN chatbot_case_groups g USING(group_id)
+                       WHERE a.alert_id=chatbot_alert_deliveries.alert_id AND g.supervisor_id=?)""",
+                           (now.isoformat(), now.isoformat(), alert_id, supervisor_id, supervisor_id))
+        return result.rowcount > 0
+    return _run(conn, _do)
 
 
 # =========================================================================
