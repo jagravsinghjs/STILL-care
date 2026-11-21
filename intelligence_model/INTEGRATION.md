@@ -12,7 +12,7 @@ uv run python chatbot/05_voice_chat/voice_chat.py --patient-id friend1
 
 The intelligence layer must already be installed (`uv pip install -e ./intelligence_model`).
 Stage 05 also initializes the shared schema at startup, preserving existing rows.
-The live path calls `ingest_turn` per turn, `end_session_and_run` at session end,
+The live path calls `ingest_turn` per turn (including early supervisor review), `end_session_and_run` at session end,
 and `save_conversation_report` after successfully generating its local report.
 The latter stores the LLM narrative alongside numerical analysis, without using
 its 0–10 estimates as inputs to the C++ 0–100 scoring/risk pipeline.
@@ -155,8 +155,10 @@ result = end_session_and_run(
 )
 ```
 
-That's the entire contract. `ingest_turn` only ever writes a row — it
-returns nothing and has no visible side effects from your side.
+`ingest_turn` stores a row and checks for an early supervisor-review alert. It
+returns a new/upgraded `Alert` when attention is needed, otherwise `None`.
+The live chatbot prints when an alert is queued. This check does not wait for
+session closure or three historical assessments.
 `end_session_and_run` triggers the full Modules 11-17 chain and returns a
 `PipelineResult` (see `pipeline/orchestrator.py`) if you want to inspect
 what happened, but you're not required to do anything with the return

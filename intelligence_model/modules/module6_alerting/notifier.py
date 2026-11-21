@@ -32,9 +32,8 @@ from schemas.schemas import Alert
 
 logger = logging.getLogger(__name__)
 
-# Placeholder path -- alertd's actual socket path isn't defined anywhere
-# yet since alertd itself doesn't exist. Configurable via env var so this
-# doesn't need code changes once alertd's real path is decided.
+# The optional relay's publish socket. Missing/unavailable relay is tolerated;
+# the database queue remains available to the supervisor API/CLI.
 ALERTD_SOCKET_PATH = os.environ.get("STILL_ALERTD_SOCKET_PATH", "/tmp/still_alertd.sock")
 
 _SOCKET_TIMEOUT_SECONDS = 0.5  # fail fast -- this must never stall the pipeline
@@ -54,6 +53,7 @@ def notify_alertd(alert: Alert) -> bool:
             "triggered_at": alert.triggered_at.isoformat(),
             "tier": alert.tier.value,
             "reason": alert.reason,
+            "priority": alert.priority,
         }
     ).encode("utf-8")
 

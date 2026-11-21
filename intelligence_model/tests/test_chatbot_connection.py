@@ -58,6 +58,7 @@ class ChatbotConnectionTests(unittest.TestCase):
         for context in (
             patch("db.connection.DB_PATH", self.db_path),
             patch.dict(os.environ, {"STILL_DB_PATH": str(self.db_path)}),
+            patch("modules.module6_alerting.alert_engine.notify_alertd", return_value=False),
         ):
             context.start()
             self.addCleanup(context.stop)
@@ -158,6 +159,18 @@ class ChatbotConnectionTests(unittest.TestCase):
         emotion = EmotionScores(anger=0, disgust=0, fear=0, joy=0, neutral=1, sadness=0, surprise=0)
         self.assertIsNone(arousal.pitch_available)
         self.assertIsNone(emotion.analysis_status)
+
+    def test_first_turn_review_is_visible_in_supervisor_api(self):
+        self.assertTrue(self.voice.push_turn_to_intelligence_model(
+            "session1", "friend1", "He hits me when I refuse his work", self.acoustic,
+            "unknown", self.emotion, turn_id="turn1"))
+        response = self.client.get("/alerts?patient_id=friend1")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json()), 1)
+        alert = response.json()[0]
+        self.assertEqual(alert["priority"], "urgent")
+        self.assertIn("needs a supervisor check-in now", alert["reason"])
+        self.assertIn("physical harm", alert["reason"])
 
     def test_one_session_cannot_accept_another_patients_turn(self):
         m = self.voice

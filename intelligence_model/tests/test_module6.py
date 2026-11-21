@@ -44,14 +44,16 @@ def test_no_prior_status_no_alert(conn):
     assert alert is None
 
 
-def test_no_tier_change_no_alert(conn):
+def test_moderate_assessment_requests_review_without_tier_change(conn):
     alert = check_and_alert(
         _risk(RiskLevel.MODERATE),
         old_status=_status(RiskTier.YELLOW),
         new_status=_status(RiskTier.YELLOW),
         conn=conn,
     )
-    assert alert is None
+    assert alert is not None
+    assert alert.reason.startswith("[REVIEW]")
+    assert alert.priority == "prompt"
 
 
 def test_escalation_creates_high_priority_alert(conn):
