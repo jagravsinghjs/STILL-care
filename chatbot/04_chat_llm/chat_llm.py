@@ -1,6 +1,6 @@
 """
 chat_llm.py
-Reads transcript_with_emotion.json (whisper text + acoustic features),
+Reads transcript_with_emotions.json (text, acoustic features, emotion probabilities),
 sends it to a local Ollama model, and produces:
   1. output/report.json      - per-segment stress/mood indicator timeline
                                 + a clinician-facing summary
@@ -9,7 +9,7 @@ sends it to a local Ollama model, and produces:
 
 Usage:
     python chat_llm.py
-    python chat_llm.py path/to/transcript_with_emotion.json path/to/output_dir
+    python chat_llm.py path/to/transcript_with_emotions.json path/to/output_dir
 """
 
 import json
