@@ -129,6 +129,29 @@ The local report is separate from the intelligence layer's cross-session
 trends/risk/alerts. Full report validation, long-conversation handling, shared
 registry consolidation, and multilingual support remain deferred.
 
+## Optional three-friend case circle
+
+Create a group and accept invitations through
+[stage 07](../07_group_coordination/README.md). Existing `--patient-id` sessions
+automatically show invitations, use the patient's accepted single-case circle,
+and poll its pending safety notices before each recording.
+
+After a reply, Qwen may identify a new firsthand safety incident. The patient
+must confirm the incident is their own, belongs to this case, and may be shared.
+Other accepted members receive a generic inbox notice; the supervisor receives
+the confirmed summary/evidence. This adds an extra model request for grouped
+turns and can increase latency. No group means no incident-extraction request.
+
+Received notices are separate application context and saved in
+`group_notices.json`, outside the text used for personal memory extraction.
+Outgoing incident IDs and the selected case/group IDs appear in `turns.json`.
+Private reports and other members' transcripts are not shared. Group failures
+are logged without blocking personal chat. There is no offline-device push;
+members see notices when opening a session/checking the CLI inbox.
+Patients see only the latest notice per case/category; already-delivered
+notices are kept as agent context without another announcement. Full history
+is available through stage 07's `inbox --history` command.
+
 ## Offline regression checks
 
 ```bash

@@ -1,6 +1,7 @@
 """Offline regression checks: no microphone, model downloads, Ollama, or real DB."""
 
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -262,6 +263,61 @@ class VoiceChatTests(unittest.TestCase):
         case = self.root / "case.json"
         case.write_text("invalid JSON")
         self.assertIsNone(m.load_case_facts(str(case)))
+
+    def test_group_notices_are_separate_from_patient_statements(self):
+        m = self.voice
+        with patch.dict(os.environ, {"STILL_DB_PATH": str(self.root / "groups.db")}):
+            groups = m.group_coordination
+            groups.create_group("circle", "case-a", "Three friends", "supervisor")
+            for patient in ("friend1", "friend3"):
+                groups.invite_member("circle", "supervisor", patient)
+                groups.respond_to_invitation("circle", patient, True, share_safety=True)
+            result = groups.record_incident("circle", "friend1", "s", "t", {
+                "kind": "following", "summary": "Private source details",
+                "evidence_quote": "A bike followed me",
+            }, confirmed_firsthand=True)
+            context = groups.get_membership("friend3")
+            messages, notices = [], []
+            m.receive_group_alerts("friend3", context, messages, notices, str(self.root / "output"))
+            self.assertEqual(len(messages), 1)
+            self.assertEqual(messages[0]["role"], "system")
+            self.assertNotIn("Private source details", messages[0]["content"])
+            self.assertNotIn("A bike followed me", messages[0]["content"])
+            m.receive_group_alerts("friend3", context, messages, notices)
+            self.assertEqual(len(messages), 1)
+            self.assertEqual(notices[0]["alert_id"], result["alert_id"])
+            self.assertIsNotNone(groups.list_alerts("friend3")[0]["delivered_at"])
+            saved = json.loads((self.root / "output" / "group_notices.json").read_text())
+            self.assertEqual(saved["case_id"], "case-a")
+            # A new chat session keeps context without announcing the same notice again.
+            with patch("sys.stdout", new_callable=io.StringIO) as output:
+                new_messages, new_notices = [], []
+                m.receive_group_alerts("friend3", context, new_messages, new_notices)
+            self.assertEqual(output.getvalue(), "")
+            self.assertEqual(len(new_messages), 1)
+            # Personal memory extraction is still fed patient text only.
+            with patch.object(m, "extract_and_merge_case_facts", return_value={}) as extract:
+                m.update_case_facts_from_session([self.turn], {})
+                self.assertEqual(extract.call_args.args[0], self.turn["text"])
+
+    def test_live_group_sharing_requires_fresh_patient_confirmation(self):
+        m = self.voice
+        context = {"group_id": "circle", "case_id": "case-a", "name": "Three friends"}
+        candidate = {"kind": "following", "summary": "Reported following", "evidence_quote": "A difficult day"}
+        with patch.object(m.group_coordination, "get_membership", return_value=context), \
+                patch.object(m.group_coordination, "extract_incidents", return_value=[candidate]) as extract, \
+                patch.object(m.group_coordination, "record_incident", return_value={"alert_id": "a"}) as record:
+            with patch("builtins.input", return_value="n"):
+                self.assertEqual(m.share_group_incidents(self.turn, "s", "patient", context), [])
+            record.assert_not_called()
+            with patch("builtins.input", return_value="yes"):
+                self.assertEqual(m.share_group_incidents(self.turn, "s", "patient", context), [{"alert_id": "a"}])
+            self.assertEqual(extract.call_args.args[0], self.turn["text"])
+            self.assertTrue(record.call_args.kwargs["confirmed_firsthand"])
+        with patch.object(m.group_coordination, "get_membership", return_value=None), \
+                patch.object(m.group_coordination, "extract_incidents") as extract:
+            self.assertEqual(m.share_group_incidents(self.turn, "s", "patient", context), [])
+            extract.assert_not_called()
 
 
 if __name__ == "__main__":
