@@ -2,10 +2,10 @@
 voice_chat.py
 Live, voice-based conversation with the assistant. Per turn:
   record -> transcribe (faster-whisper) -> acoustic features (librosa)
-  -> text emotion (j-hartmann) -> conversational reply (Ollama)
-  -> [INTEGRATION] push turn to intelligence_model via ingest_turn()
-Raw audio is NEVER written to disk or kept after a turn is processed —
-only the transcript text, extracted features, and eventual report persist.
+  -> text emotion (j-hartmann) -> checkpoint + ingest_turn()
+  -> conversational reply (Ollama) -> updated checkpoint
+Raw audio is written to a unique temporary session directory and removed
+after processing, including on exceptions. Text, features and reports persist.
 
 At the end of the session (you choose to stop between turns), TWO
 separate reports are generated, on purpose -- they answer different
@@ -59,6 +59,8 @@ import re
 import sys
 import time
 import uuid
+import shutil
+import tempfile
 from datetime import datetime, timezone
 
 import numpy as np
@@ -66,6 +68,7 @@ import requests
 import sounddevice as sd
 import soundfile as sf
 import librosa
+import torch
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -88,6 +91,11 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 OLLAMA_URL = "http://localhost:11434/api/chat"
 MODEL = "qwen2.5:7b-instruct"
 SAMPLE_RATE = 16000
+SILENCE_RMS_THRESHOLD = 1e-4
+MIN_AUDIO_SECONDS = 0.25
+PITCH_FRAME_LENGTH = 2048
+MIN_EMOTION_PROBABILITY = 0.5
+MIN_EMOTION_MARGIN = 0.1
 
 # Whisper hallucination mitigation. On short/near-silent/noisy audio,
 # faster-whisper will sometimes confidently return text that was never said
@@ -142,7 +150,8 @@ you're here so that later, their doctor has an honest picture of how things have
 of the patient having to reconstruct weeks from memory in a rushed 15-minute appointment.
 
 After what the person says, you'll sometimes see a bracketed note like [voice cues: ...] — this is
-acoustic and text-emotion analysis of HOW they said it, not something they said out loud. Use it only
+acoustic analysis of how they spoke and text-emotion analysis of their words,
+not something they said out loud. Use it only
 to calibrate your tone (e.g. if the cues suggest more distress than the words alone convey, be a little
 gentler) — NEVER mention, quote, or reference these cues directly. The person does not know this
 analysis is happening in the background.
@@ -161,6 +170,19 @@ Hard rules:
 - 0-1 emoji per reply, only if natural — do not force it every turn.
 
 Respond with plain conversational text only — no JSON, no formatting.
+"""
+
+QUALITY_PROMPT = """
+Audio and emotion quality rules:
+- When pitch_available is false, numeric pitch values are placeholders, not
+  evidence of calmness. Ignore unavailable pitch and unknown arousal labels.
+- Ignore acoustic measurements for audio_status silent or too_short.
+- Text-emotion scores describe the words, not vocal emotion or a diagnosis.
+  They are model probabilities, not calibrated confidence. If text_emotion_status
+  is uncertain or unavailable, do not treat a top emotion as an established fact.
+  Use the person's words and any available acoustic evidence instead.
+- The prototype marks text emotion uncertain when its top probability is below
+  0.5 or its lead over the runner-up is below 0.1. These are unvalidated demo rules.
 """
 
 REPORT_SYSTEM_PROMPT = """You are a clinical decision-support assistant, NOT a therapist and NOT a
@@ -196,6 +218,8 @@ Return ONLY valid JSON, no markdown fences, no preamble, in exactly this shape:
   "patient_message": "<string>"
 }
 """
+CONVO_SYSTEM_PROMPT += QUALITY_PROMPT
+REPORT_SYSTEM_PROMPT += QUALITY_PROMPT
 
 
 # ------------------------------------------------------------------
@@ -205,8 +229,15 @@ Return ONLY valid JSON, no markdown fences, no preamble, in exactly this shape:
 def load_case_facts(path):
     if not path or not os.path.isfile(path):
         return None
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            facts = json.load(f)
+        if not isinstance(facts, dict):
+            raise ValueError("Case facts must be a JSON object")
+        return facts
+    except (OSError, ValueError) as e:
+        print(f"[warn] Could not load case facts: {e}; continuing without context.")
+        return None
 
 
 def build_context_block(case_facts):
@@ -241,7 +272,7 @@ def build_context_block(case_facts):
 
     upcoming = [e for e in case_facts.get("hearing_events", []) if e.get("type") == "next_hearing"]
     if upcoming:
-        dates = ", ".join(e.get("date", "unknown date") for e in upcoming)
+        dates = ", ".join(str(e.get("date") or "unknown date") for e in upcoming)
         lines.append(f"- Upcoming hearing(s): {dates}")
 
     if case_facts.get("threats_mentioned"):
@@ -282,23 +313,38 @@ def load_models():
 
     print("Loading text-emotion model...")
     t0 = time.time()
-    emotion_classifier = pipeline(
-        task="text-classification",
-        model="j-hartmann/emotion-english-distilroberta-base",
-        top_k=None,
-        device=0,
-    )
+    device = 0 if torch.cuda.is_available() else -1
+    print(f"Text-emotion device: {'CUDA' if device == 0 else 'CPU'}")
+    try:
+        emotion_classifier = pipeline(
+            task="text-classification",
+            model="j-hartmann/emotion-english-distilroberta-base",
+            top_k=None,
+            device=device,
+        )
+    except (RuntimeError, ValueError):
+        if device == -1:
+            raise
+        print("GPU initialization failed; retrying text emotion on CPU.")
+        emotion_classifier = pipeline(
+            task="text-classification",
+            model="j-hartmann/emotion-english-distilroberta-base",
+            top_k=None,
+            device=-1,
+        )
     print(f"Emotion model loaded in {time.time()-t0:.1f}s\n")
 
     return whisper_model, emotion_classifier
 
 
 # ------------------------------------------------------------------
-# Audio recording (in-memory only, never written to disk)
+# Audio recording (temporary WAV, cleaned up by the conversation loop)
 # ------------------------------------------------------------------
 
 def record_turn_audio(save_path):
-    input("Press Enter to start speaking...")
+    action = input("Press Enter to start speaking, or type 'report' to finish: ").strip().lower()
+    if action in {"report", "quit", "exit"}:
+        return None
     print("Recording... press Enter again to stop.")
 
     frames = []
@@ -319,25 +365,54 @@ def record_turn_audio(save_path):
 
 
 # ------------------------------------------------------------------
-# Acoustic feature extraction (same logic as voice_emotion.py)
+# Acoustic feature extraction (quality handling aligned with stage 02)
 # ------------------------------------------------------------------
+
+def audio_status(audio, sr):
+    if sr != SAMPLE_RATE:
+        raise ValueError(f"Expected {SAMPLE_RATE} Hz audio, got {sr}")
+    if not len(audio):
+        return "too_short"
+    if not np.all(np.isfinite(audio)):
+        raise ValueError("Recording contains non-finite samples")
+    if float(np.sqrt(np.mean(np.square(audio)))) <= SILENCE_RMS_THRESHOLD:
+        return "silent"
+    if len(audio) < int(MIN_AUDIO_SECONDS * sr):
+        return "too_short"
+    return "ok"
+
+
+def text_emotion_status(scores):
+    if not scores:
+        return "unavailable"
+    ranked = sorted(scores.values(), reverse=True)
+    runner_up = ranked[1] if len(ranked) > 1 else 0.0
+    if ranked[0] < MIN_EMOTION_PROBABILITY or ranked[0] - runner_up < MIN_EMOTION_MARGIN:
+        return "uncertain"
+    return "ok"
+
 
 def extract_acoustic_features(wav_path):
     y, sr = librosa.load(wav_path, sr=None)
-    if len(y) == 0:
-        return {}
+    status = audio_status(y, sr)
+    if status != "ok":
+        return {
+            "audio_status": status, "pitch_available": False,
+            "pitch_mean_hz": 0.0, "pitch_std_hz": 0.0,
+            "energy_mean": float(np.sqrt(np.mean(np.square(y)))) if len(y) else 0.0,
+            "energy_std": 0.0, "zero_crossing_rate": 0.0,
+            "spectral_centroid": 0.0, "pause_ratio": 1.0 if status == "silent" else 0.0,
+        }
 
-    f0, voiced_flag, voiced_probs = librosa.pyin(y, fmin=75, fmax=450, sr=sr)
-    f0_voiced = f0[~np.isnan(f0)]
+    f0, voiced_flag, voiced_probs = librosa.pyin(
+        y, fmin=65, fmax=600, sr=sr, frame_length=PITCH_FRAME_LENGTH
+    )
+    reliable = np.isfinite(f0) & voiced_flag & (voiced_probs >= 0.5)
+    f0_voiced = f0[reliable]
+    pitch_available = len(f0_voiced) >= 2
 
-    if len(f0_voiced) > 2:
-        median_f0 = np.median(f0_voiced)
-        clean = f0_voiced[(f0_voiced > median_f0 * 0.6) & (f0_voiced < median_f0 * 1.6)]
-        if len(clean) > 0:
-            f0_voiced = clean
-
-    pitch_mean = float(np.mean(f0_voiced)) if len(f0_voiced) else 0.0
-    pitch_std = float(np.std(f0_voiced)) if len(f0_voiced) else 0.0
+    pitch_mean = float(np.mean(f0_voiced)) if pitch_available else 0.0
+    pitch_std = float(np.std(f0_voiced)) if pitch_available else 0.0
 
     rms = librosa.feature.rms(y=y)[0]
     energy_mean = float(np.mean(rms))
@@ -352,6 +427,8 @@ def extract_acoustic_features(wav_path):
     pause_ratio = 1 - (voiced_duration / total_duration) if total_duration > 0 else 0.0
 
     return {
+        "audio_status": status,
+        "pitch_available": pitch_available,
         "pitch_mean_hz": round(pitch_mean, 2),
         "pitch_std_hz": round(pitch_std, 2),
         "energy_mean": round(energy_mean, 4),
@@ -384,6 +461,8 @@ def filter_hallucinated_segments(segments):
 def classify_arousal(features):
     if not features:
         return "unknown"
+    if features.get("audio_status", "ok") != "ok" or not features.get("pitch_available", True):
+        return "unknown"
     pitch_std = features.get("pitch_std_hz", 0)
     energy_std = features.get("energy_std", 0)
     pause_ratio = features.get("pause_ratio", 0)
@@ -404,40 +483,40 @@ def classify_arousal(features):
 # [INTEGRATION] Build a TurnRecord and push it to intelligence_model.
 # Called once per turn, right after the turn's own acoustic/emotion/text
 # data is assembled -- see the call site inside run_conversation().
-def push_turn_to_intelligence_model(session_id, patient_id, turn_text, acoustic, arousal, text_emotion):
-    arousal_label = AROUSAL_LABEL_MAP.get(arousal, ArousalLabel.MODERATE)
-
-    turn_record = TurnRecord(
-        turn_id=str(uuid.uuid4()),
-        session_id=session_id,
-        patient_id=patient_id,
-        timestamp=datetime.now(timezone.utc),
-        transcript=turn_text,
-        arousal=ArousalFeatures(
-            pitch_mean=acoustic.get("pitch_mean_hz", 0.0),
-            pitch_std=acoustic.get("pitch_std_hz", 0.0),
-            energy=acoustic.get("energy_mean", 0.0),
-            zero_crossing_rate=acoustic.get("zero_crossing_rate", 0.0),
-            pause_ratio=acoustic.get("pause_ratio", 0.0),
-            arousal_label=arousal_label,
-        ),
-        emotion=EmotionScores(
-            anger=text_emotion.get("anger", 0.0),
-            disgust=text_emotion.get("disgust", 0.0),
-            fear=text_emotion.get("fear", 0.0),
-            joy=text_emotion.get("joy", 0.0),
-            neutral=text_emotion.get("neutral", 0.0),
-            sadness=text_emotion.get("sadness", 0.0),
-            surprise=text_emotion.get("surprise", 0.0),
-        ),
-    )
+def push_turn_to_intelligence_model(session_id, patient_id, turn_text, acoustic,
+                                    arousal, text_emotion, turn_id=None):
     try:
+        arousal_label = AROUSAL_LABEL_MAP.get(arousal, ArousalLabel.MODERATE)
+
+        turn_record = TurnRecord(
+            turn_id=turn_id or str(uuid.uuid4()),
+            session_id=session_id,
+            patient_id=patient_id,
+            timestamp=datetime.now(timezone.utc),
+            transcript=turn_text,
+            arousal=ArousalFeatures(
+                pitch_mean=acoustic.get("pitch_mean_hz", 0.0),
+                pitch_std=acoustic.get("pitch_std_hz", 0.0),
+                energy=acoustic.get("energy_mean", 0.0),
+                zero_crossing_rate=acoustic.get("zero_crossing_rate", 0.0),
+                pause_ratio=acoustic.get("pause_ratio", 0.0),
+                arousal_label=arousal_label,
+            ),
+            emotion=EmotionScores(
+                anger=text_emotion.get("anger", 0.0),
+                disgust=text_emotion.get("disgust", 0.0),
+                fear=text_emotion.get("fear", 0.0),
+                joy=text_emotion.get("joy", 0.0),
+                neutral=text_emotion.get("neutral", 0.0),
+                sadness=text_emotion.get("sadness", 0.0),
+                surprise=text_emotion.get("surprise", 0.0),
+            ),
+        )
         ingest_turn(turn_record)
+        return True
     except Exception as e:
-        # Fail soft, same philosophy as the case_profile JSON-parse fallback
-        # below -- a stalled or unreachable intelligence_model must never
-        # break the live conversation the patient is having right now.
-        print(f"[warn] ingest_turn() failed, this turn will be missing from intelligence_model: {e}")
+        print(f"[warn] Turn was not saved to intelligence_model: {e}")
+        return False
 
 
 # ------------------------------------------------------------------
@@ -519,93 +598,122 @@ def should_nudge_toward_doctor(turns):
 # Main conversation loop
 # ------------------------------------------------------------------
 
-def run_conversation(whisper_model, emotion_classifier, temp_dir, patient_id, system_prompt=CONVO_SYSTEM_PROMPT):
-    print("\nSession started. After each reply, press Enter to keep talking, or type 'report' to end and generate the report.\n")
+def atomic_write_json(path, data):
+    """Keep the previous JSON file intact if serialization or writing fails."""
+    directory = os.path.dirname(os.path.abspath(path))
+    os.makedirs(directory, exist_ok=True)
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", dir=directory,
+                                         encoding="utf-8", delete=False) as temporary:
+            temporary_path = temporary.name
+            json.dump(data, temporary, indent=4, ensure_ascii=False, allow_nan=False)
+        os.replace(temporary_path, path)
+    finally:
+        if temporary_path and os.path.exists(temporary_path):
+            os.remove(temporary_path)
 
+
+def save_turn_checkpoint(turns, session_id, patient_id, output_dir):
+    if output_dir is not None:
+        atomic_write_json(os.path.join(output_dir, "turns.json"), {
+            "session_id": session_id, "patient_id": patient_id, "turns": turns,
+        })
+
+
+def run_conversation(whisper_model, emotion_classifier, temp_dir, patient_id,
+                     system_prompt=CONVO_SYSTEM_PROMPT, output_dir=None):
+    print("\nSession started. Type 'report' before recording or after a reply to finish.\n")
     os.makedirs(temp_dir, exist_ok=True)
-    temp_path = os.path.join(temp_dir, "turn_tmp.wav")
-
-    # [INTEGRATION] One session_id per run of this script. Generated here,
-    # not passed in -- there's no upstream system yet that hands one out.
     session_id = str(uuid.uuid4())
     print(f"[integration] session_id = {session_id} (patient_id = {patient_id})\n")
-
     messages = []
     turns = []
-    start_time = time.time()
-    turn_index = 0
-
+    start_time = time.monotonic()
     opener = "Hey, how's it going? What's on your mind today?"
     print(f"Assistant: {opener}\n")
     messages.append({"role": "assistant", "content": opener})
 
-    while True:
-        got_audio = record_turn_audio(temp_path)
-        if not got_audio:
-            print("No audio captured, try again.")
-            continue
+    with tempfile.TemporaryDirectory(prefix="session_", dir=temp_dir) as session_temp:
+        temp_path = os.path.join(session_temp, "turn.wav")
+        while True:
+            try:
+                # Always remove audio, even when recording, Whisper, or analysis fails.
+                try:
+                    got_audio = record_turn_audio(temp_path)
+                    if got_audio is None:
+                        break
+                    if not got_audio:
+                        print("No audio captured, try again.")
+                        continue
+                    audio, sr = sf.read(temp_path, dtype="float32")
+                    status = audio_status(audio, sr)
+                    if status != "ok":
+                        print(f"Recording is {status}; please try again.")
+                        continue
+                    segments, _ = whisper_model.transcribe(
+                        temp_path, beam_size=5, language=WHISPER_LANGUAGE,
+                        condition_on_previous_text=False,
+                    )
+                    segments = filter_hallucinated_segments(list(segments))
+                    turn_text = " ".join(s.text.strip() for s in segments).strip()
+                    if not turn_text:
+                        print("Didn't catch that, try again.")
+                        continue
+                    print(f"You said: {turn_text}")
+                    elapsed = round(time.monotonic() - start_time, 1)
+                    acoustic = extract_acoustic_features(temp_path)
+                    arousal = classify_arousal(acoustic)
+                    emotion_raw = emotion_classifier(turn_text)[0]
+                    text_emotion = {item["label"]: round(item["score"], 4) for item in emotion_raw}
+                finally:
+                    if os.path.exists(temp_path):
+                        os.remove(temp_path)
 
-        segments, info = whisper_model.transcribe(
-            temp_path,
-            beam_size=5,
-            language=WHISPER_LANGUAGE,
-            condition_on_previous_text=False,  # stops hallucination loops from compounding across turns
-        )
-        segments = list(segments)
-        segments = filter_hallucinated_segments(segments)
-        turn_text = " ".join(s.text.strip() for s in segments).strip()
+                emotion_status = text_emotion_status(text_emotion)
+                turn = {
+                    "turn_index": len(turns), "turn_id": str(uuid.uuid4()),
+                    "elapsed_seconds": elapsed, "text": turn_text,
+                    "acoustic_features": acoustic, "arousal_label": arousal,
+                    "text_emotion": text_emotion, "text_emotion_status": emotion_status,
+                    "ingested": False, "reply": None,
+                }
+                turns.append(turn)
+                # Save analysis before a database write or conversational LLM call.
+                save_turn_checkpoint(turns, session_id, patient_id, output_dir)
+                turn["ingested"] = push_turn_to_intelligence_model(
+                    session_id, patient_id, turn_text, acoustic, arousal, text_emotion,
+                    turn_id=turn["turn_id"],
+                )
+                cues = {
+                    "acoustic_features": acoustic, "arousal_label": arousal,
+                    "text_emotion": text_emotion, "text_emotion_status": emotion_status,
+                }
+                user_content = turn_text + "\n[voice cues: " + json.dumps(cues) + "]"
+                messages.append({"role": "user", "content": user_content})
+                try:
+                    reply = call_ollama_chat(messages, system_prompt)
+                    if not isinstance(reply, str) or not reply.strip():
+                        raise ValueError("Ollama returned an empty conversational reply")
+                    print(f"\nAssistant: {reply}\n")
+                    messages.append({"role": "assistant", "content": reply})
+                    turn["reply"] = reply
+                except (requests.RequestException, RuntimeError, ValueError) as e:
+                    turn["reply_error"] = str(e)
+                    print(f"[warn] Reply unavailable; your turn is preserved: {e}")
+                    break
+                finally:
+                    save_turn_checkpoint(turns, session_id, patient_id, output_dir)
 
-        if not turn_text:
-            print("Didn't catch that, try again.")
-            os.remove(temp_path)
-            continue
-
-        print(f"You said: {turn_text}")
-
-        elapsed = round(time.time() - start_time, 1)
-
-        acoustic = extract_acoustic_features(temp_path)
-        arousal = classify_arousal(acoustic)
-
-        emotion_raw = emotion_classifier(turn_text)[0]
-        text_emotion = {item["label"]: round(item["score"], 4) for item in emotion_raw}
-        top_emotions = sorted(text_emotion.items(), key=lambda x: -x[1])[:3]
-
-        os.remove(temp_path)  # done with the audio — comment this out if you want to keep turn recordings
-
-        # [INTEGRATION] Push this turn to intelligence_model immediately --
-        # per turn, not batched at session end. intelligence_model only
-        # needs a plain database write here; it does no scoring per turn
-        # itself (that happens later, all at once, in end_session_and_run).
-        push_turn_to_intelligence_model(session_id, patient_id, turn_text, acoustic, arousal, text_emotion)
-
-        context_note = (
-            f"[voice cues: pitch_std={acoustic.get('pitch_std_hz', 0)}, "
-            f"energy_std={acoustic.get('energy_std', 0)}, "
-            f"pause_ratio={acoustic.get('pause_ratio', 0)}, "
-            f"arousal={arousal}, top_text_emotion={top_emotions}]"
-        )
-        user_content = f"{turn_text}\n{context_note}"
-        messages.append({"role": "user", "content": user_content})
-
-        reply = call_ollama_chat(messages, system_prompt)
-        print(f"\nAssistant: {reply}\n")
-        messages.append({"role": "assistant", "content": reply})
-
-        turns.append({
-            "turn_index": turn_index,
-            "elapsed_seconds": elapsed,
-            "text": turn_text,
-            "acoustic_features": acoustic,
-            "arousal_label": arousal,
-            "text_emotion": text_emotion,
-        })
-        turn_index += 1
-
-        action = input("Press Enter to keep talking, or type 'report' to end and generate the report: ").strip().lower()
-        if action == "report":
-            break
-
+                action = input("Press Enter to keep talking, or type 'report' to finish: ").strip().lower()
+                if action in {"report", "quit", "exit"}:
+                    break
+            except (KeyboardInterrupt, EOFError):
+                print("\nSession stopped; preserving completed turns.")
+                break
+            except Exception as e:
+                print(f"[warn] Session stopped after processing error; preserving completed turns: {e}")
+                break
     return turns, session_id
 
 
@@ -622,6 +730,7 @@ def generate_report(turns, output_dir):
             "acoustic_features": t["acoustic_features"],
             "arousal_label": t["arousal_label"],
             "text_emotion": t["text_emotion"],
+            "text_emotion_status": t.get("text_emotion_status", text_emotion_status(t["text_emotion"])),
         }
         for t in turns
     ]
@@ -648,28 +757,104 @@ def generate_report(turns, output_dir):
         turn["elapsed_seconds"] = elapsed_by_index.get(turn["turn_index"], 0)
 
     os.makedirs(output_dir, exist_ok=True)
-    report_path = os.path.join(output_dir, "report.json")
-    with open(report_path, "w") as f:
-        json.dump(result, f, indent=4)
-
-    xs = [t["elapsed_seconds"] for t in result["turns"]]
-    ys = [t["distress_score"] for t in result["turns"]]
-    plt.figure(figsize=(9, 4.5))
-    plt.plot(xs, ys, marker="o", linewidth=2)
-    plt.ylim(0, 10)
-    plt.xlabel("Time into session (s)")
-    plt.ylabel("Distress / stress indicator (0-10)")
-    plt.title("Session distress indicator over time")
-    plt.grid(alpha=0.3)
-    plt.tight_layout()
-    graph_path = os.path.join(output_dir, "mental_state.png")
-    plt.savefig(graph_path, dpi=150)
-    plt.close()
+    report_path, graph_path = save_report_and_graph(result, output_dir)
 
     print(f"\nReport written to {report_path}")
     print(f"Graph written to {graph_path}")
     print("\nClinician summary:\n", result["clinician_summary"])
     print("\nClosing message:\n", result["patient_message"])
+
+
+def make_session_graph(result, graph_path):
+
+    xs = [t["elapsed_seconds"] for t in result["turns"]]
+    ys = [t["distress_score"] for t in result["turns"]]
+    figure = plt.figure(figsize=(9, 4.5))
+    try:
+        plt.plot(xs, ys, marker="o", linewidth=2)
+        plt.ylim(0, 10)
+        plt.xlabel("Time into session (s)")
+        plt.ylabel("Distress / stress indicator (0-10)")
+        plt.title("Session distress indicator over time")
+        plt.grid(alpha=0.3)
+        plt.tight_layout()
+        plt.savefig(graph_path, dpi=150)
+    finally:
+        plt.close(figure)
+
+
+def save_report_and_graph(result, output_dir):
+    report_path = os.path.join(output_dir, "report.json")
+    graph_path = os.path.join(output_dir, "mental_state.png")
+    with tempfile.TemporaryDirectory(dir=output_dir, prefix=".report_") as staging:
+        staged_report = os.path.join(staging, "report.json")
+        staged_graph = os.path.join(staging, "mental_state.png")
+        with open(staged_report, "w", encoding="utf-8") as f:
+            json.dump(result, f, indent=4, ensure_ascii=False)
+        make_session_graph(result, staged_graph)
+        previous_report = os.path.join(staging, "previous_report.json")
+        had_report = os.path.exists(report_path)
+        if had_report:
+            shutil.copy2(report_path, previous_report)
+        os.replace(staged_report, report_path)
+        try:
+            os.replace(staged_graph, graph_path)
+        except OSError:
+            if had_report:
+                os.replace(previous_report, report_path)
+            else:
+                os.remove(report_path)
+            raise
+    return report_path, graph_path
+
+
+def finalize_session(turns, session_id, patient_id, case_facts_path, case_facts, output_dir):
+    """Attempt each independent result even when another stage fails."""
+    end_time = datetime.now(timezone.utc)
+    outcomes = {}
+    try:
+        save_turn_checkpoint(turns, session_id, patient_id, output_dir)
+        outcomes["checkpoint"] = "saved"
+    except Exception as e:
+        outcomes["checkpoint"] = "failed"
+        print(f"[warn] Could not save turn checkpoint: {e}")
+
+    outcomes["memory"] = "skipped"
+    if case_facts_path and extract_and_merge_case_facts is not None:
+        try:
+            updated_facts = update_case_facts_from_session(turns, case_facts)
+            atomic_write_json(case_facts_path, updated_facts)
+            outcomes["memory"] = "updated"
+            print(f"\nCase facts updated: {case_facts_path}")
+        except Exception as e:
+            outcomes["memory"] = "failed"
+            print(f"[warn] Case memory update failed; keeping the existing profile: {e}")
+
+    ingested_count = sum(bool(t.get("ingested")) for t in turns)
+    outcomes["monitoring"] = "skipped"
+    if ingested_count:
+        try:
+            pipeline_result = end_session_and_run(
+                session_id=session_id, end_time=end_time, turn_count=ingested_count,
+            )
+            outcomes["monitoring"] = "completed"
+            print(f"\n[integration] intelligence_model pipeline result: {pipeline_result}")
+        except Exception as e:
+            outcomes["monitoring"] = "failed"
+            print(f"[warn] Monitoring finalization failed: {e}")
+    if ingested_count != len(turns):
+        print(f"[warn] Monitoring received {ingested_count}/{len(turns)} turns; "
+              "the local checkpoint preserves all analyzed turns.")
+
+    try:
+        os.makedirs(output_dir, exist_ok=True)
+        generate_report(turns, output_dir)
+        outcomes["report"] = "saved"
+    except Exception as e:
+        outcomes["report"] = "failed"
+        print(f"[warn] Local report failed; see the turn checkpoint for session data: {e}")
+    print(f"\nSession results: {outcomes}")
+    return outcomes
 
 
 if __name__ == "__main__":
@@ -706,36 +891,17 @@ if __name__ == "__main__":
 
     whisper_model, emotion_classifier = load_models()
     temp_dir = os.path.join(SCRIPT_DIR, "tmp")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    output_dir = os.path.join(SCRIPT_DIR, "output", f"session_{timestamp}")
     turns, session_id = run_conversation(
-        whisper_model, emotion_classifier, temp_dir, args.patient_id, system_prompt=system_prompt
+        whisper_model, emotion_classifier, temp_dir, args.patient_id,
+        system_prompt=system_prompt, output_dir=output_dir,
     )
 
     if not turns:
         print("No turns recorded, nothing to report on.")
         sys.exit(0)
 
-    if case_facts_path:
-        updated_facts = update_case_facts_from_session(turns, case_facts)
-        with open(case_facts_path, "w", encoding="utf-8") as f:
-            json.dump(updated_facts, f, indent=2)
-        print(f"\nCase facts updated: {case_facts_path}")
-
-    # [INTEGRATION] Trigger the full Modules 11-17 chain now that the
-    # session is over. This is the exact "who decides a session ended"
-    # trigger point INTEGRATION.md calls out as open/unbuilt -- it's the
-    # user typing 'report', right here.
-    try:
-        pipeline_result = end_session_and_run(
-            session_id=session_id,
-            end_time=datetime.now(timezone.utc),
-            turn_count=len(turns),
-        )
-        print(f"\n[integration] intelligence_model pipeline result: {pipeline_result}")
-    except Exception as e:
-        print(f"[warn] end_session_and_run() failed -- this session will be missing from "
-              f"intelligence_model's trend/risk/alert chain: {e}")
-
-    # voice_chat's OWN report -- separate artifact, same as before.
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_dir = os.path.join(SCRIPT_DIR, "output", f"session_{timestamp}")
-    generate_report(turns, output_dir)
+    finalize_session(
+        turns, session_id, args.patient_id, case_facts_path, case_facts, output_dir,
+    )
