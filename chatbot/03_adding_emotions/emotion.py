@@ -3,6 +3,7 @@ import os
 import sys
 import subprocess
 import tempfile
+from numbers import Real
 
 import numpy as np
 import librosa
@@ -11,9 +12,12 @@ from transformers import Wav2Vec2FeatureExtractor, Wav2Vec2ForSequenceClassifica
 
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+OUTPUT_PATH = os.path.join(SCRIPT_DIR, "output", "transcript_with_emotions.json")
 
 MODEL_ID = "ehcalabres/wav2vec2-lg-xlsr-en-speech-emotion-recognition"
 TARGET_SR = 16000
+SILENCE_RMS_THRESHOLD = 1e-4
+MIN_AUDIO_SECONDS = 0.25  # Demo quality cutoff, not a model accuracy guarantee.
 
 
 def load_audio(path):
@@ -50,6 +54,11 @@ def load_audio(path):
                 f"FFmpeg could not decode audio file: {path}\n"
                 f"{e.stderr}"
             ) from e
+        except FileNotFoundError as e:
+            raise RuntimeError(
+                "FFmpeg is required to decode audio. On EndeavourOS/Arch, "
+                "install it with: sudo pacman -S ffmpeg"
+            ) from e
 
         y, sr = librosa.load(
             tmp.name,
@@ -67,10 +76,44 @@ def load_model():
     return feature_extractor, model
 
 
+def validate_timestamps(start, end, duration, sr):
+    """Reject invalid boundaries; allow stage 01's two-decimal rounding."""
+    for name, value in (("start", start), ("end", end)):
+        if isinstance(value, bool) or not isinstance(value, Real) or not np.isfinite(value):
+            raise ValueError(f"{name} must be a finite number of seconds, got {value!r}")
+    if start < 0 or end <= start:
+        raise ValueError(f"Expected 0 <= start < end, got start={start}, end={end}")
+    if start >= duration or end > duration + 0.005 + 1 / sr:
+        raise ValueError(
+            f"Segment {start}-{end}s exceeds audio duration {duration:.6f}s; "
+            "check that the transcript and recording belong together"
+        )
+    end = min(end, duration)
+    if int(end * sr) <= int(start * sr):
+        raise ValueError(f"Segment {start}-{end}s contains no audio samples")
+    return float(start), float(end)
+
+
+def emotion_audio_status(audio_chunk, sr):
+    """Check the waveform itself, including when demo inputs lack stage 02 flags."""
+    if sr != TARGET_SR:
+        raise ValueError(f"Emotion inference requires {TARGET_SR} Hz audio, got {sr}")
+    if len(audio_chunk) == 0:
+        return "too_short"
+    if not np.all(np.isfinite(audio_chunk)):
+        raise ValueError("Audio contains non-finite samples")
+    rms = float(np.sqrt(np.mean(np.square(audio_chunk))))
+    if rms <= SILENCE_RMS_THRESHOLD:
+        return "silent"
+    if len(audio_chunk) < int(MIN_AUDIO_SECONDS * sr):
+        return "too_short"
+    return "ok"
+
+
 def predict_emotion(feature_extractor, model, audio_chunk, sr):
     """Run SER model on a raw audio array, return {label: prob} dict."""
 
-    if len(audio_chunk) == 0:
+    if emotion_audio_status(audio_chunk, sr) != "ok":
         return {}
 
     inputs = feature_extractor(
@@ -92,30 +135,47 @@ def predict_emotion(feature_extractor, model, audio_chunk, sr):
     }
 
 
-def main(audio_path, transcript_path, output_path):
+def main(audio_path, transcript_path):
 
     print("Loading audio...")
     y, sr = load_audio(audio_path)
 
-    print("Loading model...")
-    feature_extractor, model = load_model()
-
-    with open(transcript_path, "r") as f:
+    with open(transcript_path, "r", encoding="utf-8") as f:
         segments = json.load(f)
+
+    if not isinstance(segments, list):
+        raise ValueError("Transcript must be a JSON list of segments")
+
+    # Read all segment inputs and check audio usability before loading a model.
+    segment_audio = []
+    for i, seg in enumerate(segments):
+        try:
+            if not isinstance(seg, dict):
+                raise ValueError("Segment must be an object")
+            seg["start"], seg["end"] = validate_timestamps(
+                seg["start"], seg["end"], len(y) / sr, sr
+            )
+            start_sample = int(seg["start"] * sr)
+            end_sample = int(seg["end"] * sr)
+            chunk = y[start_sample:end_sample]
+            status = emotion_audio_status(chunk, sr)
+        except (KeyError, TypeError, ValueError, OverflowError) as e:
+            raise ValueError(f"Cannot read segment {i + 1}: {e}") from e
+        segment_audio.append((chunk, status))
+
+    feature_extractor, model = None, None
 
     for i, seg in enumerate(segments):
 
-        start_sample = int(seg["start"] * sr)
-        end_sample = int(seg["end"] * sr)
-        chunk = y[start_sample:end_sample]
+        chunk, status = segment_audio[i]
+        emotion_probs = {}
+        if status == "ok":
+            if model is None:
+                print("Loading speech-emotion model on CPU...")
+                feature_extractor, model = load_model()
+            emotion_probs = predict_emotion(feature_extractor, model, chunk, sr)
 
-        emotion_probs = predict_emotion(
-            feature_extractor,
-            model,
-            chunk,
-            sr,
-        )
-
+        seg["speech_emotion_status"] = status
         seg["speech_emotion"] = emotion_probs
         seg["speech_emotion_label"] = (
             max(emotion_probs, key=emotion_probs.get)
@@ -126,15 +186,15 @@ def main(audio_path, transcript_path, output_path):
         print(
             f"[{i + 1}/{len(segments)}] "
             f"{seg['start']}-{seg['end']}s -> "
-            f"{seg['speech_emotion_label']}"
+            f"{seg['speech_emotion_label']} (status: {status})"
         )
 
     os.makedirs(
-        os.path.dirname(output_path),
+        os.path.dirname(OUTPUT_PATH),
         exist_ok=True,
     )
 
-    with open(output_path, "w") as f:
+    with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
         json.dump(
             segments,
             f,
@@ -144,11 +204,17 @@ def main(audio_path, transcript_path, output_path):
 
     print(
         f"Wrote {len(segments)} segments "
-        f"with speech emotion to {output_path}"
+        f"with speech emotion to {OUTPUT_PATH}"
     )
 
 
 if __name__ == "__main__":
+
+    if len(sys.argv) > 3:
+        raise SystemExit(
+            "Usage: python emotion.py [audio_path] [transcript_path]\n"
+            f"Output is fixed at: {OUTPUT_PATH}"
+        )
 
     audio_path = (
         sys.argv[1]
@@ -170,18 +236,7 @@ if __name__ == "__main__":
         )
     )
 
-    output_path = (
-        sys.argv[3]
-        if len(sys.argv) > 3
-        else os.path.join(
-            SCRIPT_DIR,
-            "output",
-            "transcript_with_emotions.json",
-        )
-    )
-
     main(
         audio_path,
         transcript_path,
-        output_path,
     )

@@ -3,12 +3,18 @@ import os
 import sys
 import subprocess
 import tempfile
+from numbers import Real
 
 import numpy as np
 import librosa
 
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PITCH_MIN_HZ = 65.0
+PITCH_MAX_HZ = 600.0
+MIN_VOICED_PROBABILITY = 0.5
+PITCH_FRAME_LENGTH = 2048
+SILENCE_RMS_THRESHOLD = 1e-4  # -80 dBFS for normalized floating-point audio
 
 
 def load_audio(path):
@@ -55,31 +61,76 @@ def load_audio(path):
     return y, sr
 
 
+def validate_timestamps(start, end, duration, sr):
+    """Validate seconds, allowing only the rounding error from stage 01."""
+    for name, value in (("start", start), ("end", end)):
+        if isinstance(value, bool) or not isinstance(value, Real) or not np.isfinite(value):
+            raise ValueError(f"{name} must be a finite number of seconds, got {value!r}")
+
+    if start < 0 or end <= start:
+        raise ValueError(f"Expected 0 <= start < end, got start={start}, end={end}")
+
+    # Stage 01 rounds to two decimals: at most half of 0.01 s of overshoot.
+    tolerance = 0.005 + 1 / sr
+    if start >= duration or end > duration + tolerance:
+        raise ValueError(
+            f"Segment {start}-{end}s exceeds audio duration {duration:.6f}s; "
+            "check that the transcript and recording belong together"
+        )
+
+    end = min(end, duration)
+    if int(end * sr) <= int(start * sr):
+        raise ValueError(f"Segment {start}-{end}s contains no audio samples")
+    return float(start), float(end)
+
+
 def extract_segment_features(y, sr, start, end):
+    start, end = validate_timestamps(start, end, len(y) / sr, sr)
     seg = y[int(start * sr):int(end * sr)]
 
-    if len(seg) == 0:
-        return {}
+    signal_rms = float(np.sqrt(np.mean(np.square(seg))))
+    is_silent = signal_rms <= SILENCE_RMS_THRESHOLD
+    is_too_short = len(seg) < PITCH_FRAME_LENGTH
+
+    if is_silent or is_too_short:
+        # Keep numeric fields compatible with the monitoring adapter. Status
+        # and availability distinguish these placeholders from measurements.
+        return {
+            "pitch_mean_hz": 0.0,
+            "pitch_std_hz": 0.0,
+            "pitch_available": False,
+            "audio_status": "silent" if is_silent else "too_short",
+            "energy_mean": signal_rms,
+            "energy_std": 0.0,
+            "zero_crossing_rate": 0.0,
+            "spectral_centroid": 0.0,
+            "pause_ratio": 1.0 if is_silent else 0.0,
+        }
 
     # Pitch (F0)
     f0, voiced_flag, voiced_probs = librosa.pyin(
         seg,
-        fmin=librosa.note_to_hz("C2"),
-        fmax=librosa.note_to_hz("C7"),
+        fmin=PITCH_MIN_HZ,
+        fmax=PITCH_MAX_HZ,
         sr=sr,
+        frame_length=PITCH_FRAME_LENGTH,
     )
 
-    f0_voiced = f0[~np.isnan(f0)]
+    # Exclude unvoiced/uncertain frames rather than letting pitch-tracking
+    # errors inflate variability and trigger the high-arousal heuristic.
+    reliable = np.isfinite(f0) & voiced_flag & (voiced_probs >= MIN_VOICED_PROBABILITY)
+    f0_voiced = f0[reliable]
+    pitch_available = len(f0_voiced) >= 2
 
     pitch_mean = (
         float(np.mean(f0_voiced))
-        if len(f0_voiced)
+        if pitch_available
         else 0.0
     )
 
     pitch_std = (
         float(np.std(f0_voiced))
-        if len(f0_voiced)
+        if pitch_available
         else 0.0
     )
 
@@ -127,6 +178,8 @@ def extract_segment_features(y, sr, start, end):
     return {
         "pitch_mean_hz": round(pitch_mean, 2),
         "pitch_std_hz": round(pitch_std, 2),
+        "pitch_available": pitch_available,
+        "audio_status": "ok",
         "energy_mean": round(energy_mean, 4),
         "energy_std": round(energy_std, 4),
         "zero_crossing_rate": round(zcr, 4),
@@ -139,6 +192,9 @@ def classify_arousal(features):
     """Simple heuristic scoring."""
 
     if not features:
+        return "unknown"
+
+    if features.get("audio_status", "ok") != "ok" or not features.get("pitch_available", True):
         return "unknown"
 
     pitch_std = features.get("pitch_std_hz", 0)
@@ -174,13 +230,23 @@ def main(audio_path, transcript_path, output_path):
     with open(transcript_path, "r") as f:
         segments = json.load(f)
 
-    for seg in segments:
+    for index, seg in enumerate(segments):
+
+        try:
+            start, end = validate_timestamps(
+                seg["start"], seg["end"], len(y) / sr, sr
+            )
+        except (KeyError, ValueError) as e:
+            raise ValueError(f"Invalid timestamps in segment {index + 1}: {e}") from e
+
+        # Save the actual boundary if rounding extended past the final sample.
+        seg["start"], seg["end"] = start, end
 
         feats = extract_segment_features(
             y,
             sr,
-            seg["start"],
-            seg["end"],
+            start,
+            end,
         )
 
         seg["acoustic_features"] = feats
@@ -200,7 +266,7 @@ def main(audio_path, transcript_path, output_path):
 
     print(
         f"Wrote {len(segments)} segments "
-        f"with emotion features to {output_path}"
+        f"with acoustic features to {output_path}"
     )
 
 

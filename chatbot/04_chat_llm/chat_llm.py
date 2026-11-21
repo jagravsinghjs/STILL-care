@@ -1,6 +1,6 @@
 """
 chat_llm.py
-Reads transcript_with_emotion.json (whisper text + acoustic features),
+Reads transcript_with_emotions.json (text, acoustic features, emotion probabilities),
 sends it to a local Ollama model, and produces:
   1. output/report.json      - per-segment stress/mood indicator timeline
                                 + a clinician-facing summary
@@ -9,12 +9,14 @@ sends it to a local Ollama model, and produces:
 
 Usage:
     python chat_llm.py
-    python chat_llm.py path/to/transcript_with_emotion.json path/to/output_dir
+    python chat_llm.py path/to/transcript_with_emotions.json path/to/output_dir
 """
 
 import json
 import os
 import sys
+import shutil
+import tempfile
 import requests
 import matplotlib
 matplotlib.use("Agg")
@@ -23,6 +25,8 @@ import matplotlib.pyplot as plt
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 OLLAMA_URL = "http://localhost:11434/api/chat"
 MODEL = "qwen2.5:7b-instruct"
+MIN_EMOTION_PROBABILITY = 0.5
+MIN_EMOTION_MARGIN = 0.1
 
 REQUIRED_KEYS = ("segments", "clinician_summary", "patient_message")
 
@@ -30,6 +34,20 @@ SYSTEM_PROMPT = """You are a clinical decision-support assistant, NOT a therapis
 You are given a transcript of a patient's voice-note reflections, segment by segment, along with
 acoustic features (pitch variability, energy variability, pause ratio, arousal label) extracted from
 their speech.
+
+Input quality rules:
+- If acoustic_features.pitch_available is false, pitch values are placeholders:
+  ignore them, including zeros. Missing pitch is not evidence of calmness.
+- If acoustic_features.audio_status is "silent" or "too_short", ignore its
+  acoustic measurements and arousal label. An "unknown" arousal label is not calmness.
+- speech_emotion_status can be "ok", "uncertain", "unverified", "silent", or
+  "too_short". Only use an emotion label when its status is "ok". For other
+  statuses, rely on the words and any available acoustic cues, and acknowledge
+  limited evidence rather than inventing an emotion.
+- speech_emotion contains model probabilities, not verified confidence. Similar
+  probabilities (for example 0.14 versus 0.13) are ambiguous. A prototype filter
+  marks predictions uncertain if the top probability is below 0.5 or its lead
+  over the runner-up is below 0.1. These thresholds are not clinically validated.
 
 Your job:
 1. For EACH segment, assign a "distress_score" from 0 (calm/settled) to 10 (highly distressed/agitated).
@@ -85,11 +103,7 @@ patient_message brief to fit. Never omit a key.
 
 def trim_segment_for_prompt(seg):
     """
-    Send the LLM only what the prompt actually asks it to reason about.
-    Drops the raw 8-way speech_emotion probability dict (redundant noise the
-    prompt never references) and keeps just the label, to cut prompt size
-    and avoid conflicting-signal confusion between arousal_label and
-    speech_emotion_label on short clips.
+    Preserve quality flags and probabilities; suppress unsupported emotion labels.
     """
     trimmed = {
         "start": seg.get("start"),
@@ -98,8 +112,24 @@ def trim_segment_for_prompt(seg):
         "acoustic_features": seg.get("acoustic_features"),
         "arousal_label": seg.get("arousal_label"),
     }
-    if "speech_emotion_label" in seg:
-        trimmed["speech_emotion_label"] = seg["speech_emotion_label"]
+    probabilities = seg.get("speech_emotion") or {}
+    status = seg.get("speech_emotion_status", "ok")
+    label = None
+    if status == "ok":
+        if probabilities:
+            ranked = sorted(probabilities.items(), key=lambda item: item[1], reverse=True)
+            top_label, top_probability = ranked[0]
+            runner_up_probability = ranked[1][1] if len(ranked) > 1 else 0.0
+            if (top_probability < MIN_EMOTION_PROBABILITY
+                    or top_probability - runner_up_probability < MIN_EMOTION_MARGIN):
+                status = "uncertain"
+            else:
+                label = top_label
+        else:
+            status = "unverified"
+    trimmed["speech_emotion"] = probabilities
+    trimmed["speech_emotion_status"] = status
+    trimmed["speech_emotion_label"] = label
     return trimmed
 
 
@@ -188,16 +218,45 @@ def make_graph(segments, out_path):
     xs = [s["start"] for s in segments]
     ys = [s["distress_score"] for s in segments]
 
-    plt.figure(figsize=(9, 4.5))
-    plt.plot(xs, ys, marker="o", linewidth=2)
-    plt.ylim(0, 10)
-    plt.xlabel("Time (s)")
-    plt.ylabel("Distress / stress indicator (0-10)")
-    plt.title("Session distress indicator over time")
-    plt.grid(alpha=0.3)
-    plt.tight_layout()
-    plt.savefig(out_path, dpi=150)
-    plt.close()
+    figure = plt.figure(figsize=(9, 4.5))
+    try:
+        plt.plot(xs, ys, marker="o", linewidth=2)
+        plt.ylim(0, 10)
+        plt.xlabel("Time (s)")
+        plt.ylabel("Distress / stress indicator (0-10)")
+        plt.title("Session distress indicator over time")
+        plt.grid(alpha=0.3)
+        plt.tight_layout()
+        plt.savefig(out_path, dpi=150)
+    finally:
+        plt.close(figure)
+
+
+def save_report_and_graph(result, output_dir):
+    """Prepare both artifacts before publishing; roll back a failed graph rename."""
+    report_path = os.path.join(output_dir, "report.json")
+    graph_path = os.path.join(output_dir, "mental_state.png")
+    with tempfile.TemporaryDirectory(dir=output_dir, prefix=".report_") as staging:
+        staged_report = os.path.join(staging, "report.json")
+        staged_graph = os.path.join(staging, "mental_state.png")
+        with open(staged_report, "w") as f:
+            json.dump(result, f, indent=4)
+        make_graph(result["segments"], staged_graph)
+
+        previous_report = os.path.join(staging, "previous_report.json")
+        had_report = os.path.exists(report_path)
+        if had_report:
+            shutil.copy2(report_path, previous_report)
+        os.replace(staged_report, report_path)
+        try:
+            os.replace(staged_graph, graph_path)
+        except OSError:
+            if had_report:
+                os.replace(previous_report, report_path)
+            else:
+                os.remove(report_path)
+            raise
+    return report_path, graph_path
 
 
 def redistribute_trailing_emoji(text):
@@ -294,12 +353,7 @@ def main(input_path, output_dir):
             " If this keeps building, it could help to flag it with your doctor too."
         )
 
-    report_path = os.path.join(output_dir, "report.json")
-    with open(report_path, "w") as f:
-        json.dump(result, f, indent=4)
-
-    graph_path = os.path.join(output_dir, "mental_state.png")
-    make_graph(result["segments"], graph_path)
+    report_path, graph_path = save_report_and_graph(result, output_dir)
 
     print(f"Report written to {report_path}")
     print(f"Graph written to {graph_path}")
