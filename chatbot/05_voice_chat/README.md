@@ -199,3 +199,7 @@ uv run python -m unittest discover -s chatbot/05_voice_chat/tests -v
 
 Tests use synthetic recordings and mocked model/pipeline calls. They do not
 open the microphone, download weights, call Ollama, or write to the real database.
+
+### Saved profile personalization
+
+Each new voice session now loads the patient's original saved profile narrative from the shared database through `06_case_profile/personalization.py`. It is supplied as untrusted user-role background, separately from the system prompt and structured case facts. Profile edits apply to subsequent sessions. Use the same absolute `STILL_DB_PATH` for the API and CLI. See [profile integration](../../frontend/PROFILES.md) for persistence and test details.

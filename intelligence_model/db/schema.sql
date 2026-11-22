@@ -136,3 +136,39 @@ CREATE TABLE IF NOT EXISTS chatbot_session_reports (
     generated_at TEXT NOT NULL,
     report_json TEXT NOT NULL
 );
+
+-- Verified account directory populated by the enclosing authentication backend.
+CREATE TABLE IF NOT EXISTS consultant_accounts (
+    consultant_id TEXT PRIMARY KEY, display_name TEXT NOT NULL,
+    email TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS consultant_assignment_requests (
+    request_id TEXT PRIMARY KEY, patient_id TEXT NOT NULL,
+    consultant_id TEXT NOT NULL REFERENCES consultant_accounts(consultant_id),
+    display_identifier TEXT NOT NULL, created_at TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','accepted','rejected')),
+    responded_at TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS one_pending_consultant_request
+    ON consultant_assignment_requests(patient_id) WHERE status='pending';
+CREATE TABLE IF NOT EXISTS consultant_assignments (
+    patient_id TEXT PRIMARY KEY, consultant_id TEXT NOT NULL REFERENCES consultant_accounts(consultant_id),
+    display_identifier TEXT NOT NULL, accepted_at TEXT NOT NULL
+);
+
+-- Existing case-profile registry, shared with chatbot 06.
+CREATE TABLE IF NOT EXISTS patients (
+ patient_id TEXT PRIMARY KEY, display_name TEXT, case_facts_path TEXT,
+ created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS patient_personalization (
+ patient_id TEXT PRIMARY KEY, narrative TEXT NOT NULL DEFAULT '' CHECK(length(narrative)<=2000), updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS consultant_descriptions (
+ consultant_id TEXT PRIMARY KEY REFERENCES consultant_accounts(consultant_id),
+ description TEXT NOT NULL DEFAULT '' CHECK(length(description)<=1000)
+);
+CREATE TABLE IF NOT EXISTS profile_photos (
+ role TEXT NOT NULL CHECK(role IN ('patient','consultant')), owner_id TEXT NOT NULL,
+ image_png BLOB NOT NULL, PRIMARY KEY(role,owner_id)
+);

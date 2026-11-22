@@ -32,6 +32,18 @@ def get_db() -> Iterator:
         yield conn
 
 
+def get_current_patient(request: Request) -> str:
+    """Patient ID resolved by the enclosing backend from its verified session.
+
+    Never accept identity from query parameters, path IDs, or client headers.
+    The auth backend must map account ID to the existing pipeline patient ID.
+    """
+    patient_id = getattr(request.state, "patient_id", None)
+    if not isinstance(patient_id, str) or not patient_id.strip():
+        raise HTTPException(status_code=401, detail="Authenticated patient identity required")
+    return patient_id
+
+
 def get_current_supervisor(request: Request) -> str:
     """
     Returns the authenticated supervisor's identifier. THIS LAYER DOES NO

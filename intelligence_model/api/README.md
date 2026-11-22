@@ -113,3 +113,8 @@ point in production, so it's where auto-commit-on-success (via
 `db.connection.get_conn()`'s context manager) finally makes sense to
 apply, rather than pushing the obligation to yet another caller that
 doesn't exist.
+## Patient dashboard read API
+
+`routes_patient.py` exposes `GET /patient/sessions`, `GET /patient/sessions/{session_id}`, and `GET /patient/sessions/{session_id}/graph`. Each requires the enclosing backend to attach an authenticated `request.state.patient_id`, mapped to the pipeline identity. It never accepts identity from client headers or query parameters. Every record/artifact lookup is ownership-scoped. Anonymous access is denied; private responses are not cacheable. No session creation or model generation occurs in these routes.
+
+See [frontend/DASHBOARD.md](../../frontend/DASHBOARD.md) for the contract, artifact handling, score meanings, tests and remaining browser voice/authentication integration.

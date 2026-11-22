@@ -18,6 +18,7 @@ from .routes_interventions import router as interventions_router
 from .routes_reports import router as reports_router
 from .routes_supervisor_view import router as supervisor_view_router
 from .routes_case_groups import router as case_groups_router
+from .routes_patient import router as patient_router
 
 app = FastAPI(
     title="Still — Monitoring & Intelligence layer",
@@ -30,3 +31,10 @@ app.include_router(alerts_router)
 app.include_router(interventions_router)
 app.include_router(supervisor_view_router)
 app.include_router(case_groups_router)
+app.include_router(patient_router)
+
+from .routes_consultant import router as consultant_router
+app.include_router(consultant_router)
+
+from .routes_profiles import router as profiles_router
+app.include_router(profiles_router)

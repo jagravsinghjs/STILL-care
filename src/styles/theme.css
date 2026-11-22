@@ -1,0 +1,18 @@
+:root {
+  color-scheme: light;
+  --green: #08752b;
+  --green-dark: #075524;
+  --green-medium: #389b35;
+  --green-light: #eaf5e7;
+  --white: #fff;
+  --muted: #65776e;
+  --border: #aec8b0;
+  --gradient: linear-gradient(115deg, #389b28 0%, #13752a 46%, #006024 100%);
+  --font: Arial, Helvetica, sans-serif;
+  font-family: var(--font);
+  color: var(--green-dark);
+  background: var(--white);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
