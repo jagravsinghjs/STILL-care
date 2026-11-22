@@ -131,6 +131,7 @@ AROUSAL_LABEL_MAP = {
 
 CASE_PROFILE_DIR = os.path.join(SCRIPT_DIR, "..", "06_case_profile")
 sys.path.insert(0, CASE_PROFILE_DIR)
+from personalization import personalization_messages, PERSONALIZATION_RULE
 try:
     from case_profile import extract_and_merge_case_facts
 except ImportError:
@@ -720,7 +721,8 @@ def run_conversation(whisper_model, emotion_classifier, temp_dir, patient_id,
     os.makedirs(temp_dir, exist_ok=True)
     session_id = str(uuid.uuid4())
     print(f"[integration] session_id = {session_id} (patient_id = {patient_id})\n")
-    messages = []
+    system_prompt += PERSONALIZATION_RULE
+    messages = personalization_messages(patient_id)
     turns = []
     received_notices = []
     start_time = time.monotonic()

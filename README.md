@@ -40,6 +40,19 @@ case profile (06) ⇄ injected into the chat at start, updated at the end
 
 ## Requirements
 
+### Web frontend
+
+The rebuilt mobile-first login and registration UI runs independently of the voice pipeline:
+
+```bash
+npm ci
+npm run dev
+```
+
+Open http://localhost:3000. Authentication endpoints are not implemented yet; the UI does not simulate successful login. See [frontend/README.md](frontend/README.md) for the source structure, tests, and required backend contract.
+
+### Voice pipeline
+
 - Linux/macOS/Windows with Python 3.12 and [uv](https://docs.astral.sh/uv/)
 - [Ollama](https://ollama.com) with the `qwen2.5:7b-instruct` model
 - A microphone and a quiet room

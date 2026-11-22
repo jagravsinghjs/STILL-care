@@ -1,20 +1,5 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# Frontend source
 
-# Run and deploy your AI Studio app
+React + TypeScript authentication UI and patient dashboard. See [frontend/README.md](../frontend/README.md) for setup and authentication; [frontend/DASHBOARD.md](../frontend/DASHBOARD.md) describes the patient API, saved-data sources and remaining browser voice integration.
 
-This contains everything you need to run your app locally.
-
-View your app in AI Studio: https://ai.studio/apps/a90699f5-9df7-4828-be2e-8c1c20091fd9
-
-## Run Locally
-
-**Prerequisites:**  Node.js
-
-
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+Run `npm run dev` from the repository root. Shared UI lives in `components/`, screen logic in `pages/`, auth requests and identity state in `auth/`, and theme tokens in `styles/theme.css`. Decorative SVG assets live in `public/illustrations/`.

@@ -22,3 +22,5 @@ httpx==0.28.1               # required by fastapi.testclient / async test calls
 
 # --- Dev convenience ---
 python-dotenv==1.0.1         # loads DB path / config from a .env file instead of hardcoding
+# Validated/re-encoded private profile photos
+Pillow==12.3.0
